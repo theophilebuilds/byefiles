@@ -30,6 +30,8 @@ CACHE_FILE = os.path.join(STATE, "cache.json")
 THUMBS = os.path.join(STATE, "thumbs")
 PREVIEWS = os.path.join(STATE, "previews")
 SKIP_NAMES = {".DS_Store", "Icon\r", ".localized"}
+# Analyses IA lancées en même temps. Au-delà de 2, le modèle d'Apple ne va pas plus vite.
+PARALLEL = 2
 
 CATEGORIES = [
     ("supprimer", "🗑️ Probablement inutiles : supprimables",
@@ -483,7 +485,7 @@ def analyze(folder, live, reanalyze=False):
             if n[0] % 10 == 0 or n[0] == len(need):
                 log(f"  {n[0]}/{len(need)}")
                 save_cache(cache)
-        engine("classify", {"today": today.strftime("%d/%m/%Y"), "items": need}, got_cls)
+        engine("classify", {"today": today.strftime("%d/%m/%Y"), "parallel": PARALLEL, "items": need}, got_cls)
         save_cache(cache)
     for it in items:
         it["analysis"] = it["analysis"] or {"sujet": "", "type": "autre"}
