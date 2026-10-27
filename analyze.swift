@@ -3,7 +3,7 @@
 // Modes (entrée JSON sur stdin, sortie JSON ligne par ligne sur stdout) :
 //   check     -> dit si le modèle d'Apple est disponible
 //   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb"} par ligne
-//   classify  -> {"today","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir"} par ligne
+//   classify  -> {"today","parallel","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir"} par ligne
 import AppKit
 import Foundation
 import FoundationModels
@@ -178,7 +178,21 @@ Types :
 - autre : rien de tout ça
 """
 
-func classifyOne(_ text: String, date: String, meta: String, today: String) async -> [String: Any] {
+struct Resultat: Sendable {
+    let id: String
+    let sujet: String
+    let type: String
+    let aVenir: Bool
+    let erreur: String?
+
+    var json: [String: Any] {
+        var r: [String: Any] = ["id": id, "sujet": sujet, "type": type, "aVenir": aVenir]
+        if let erreur { r["error"] = erreur }
+        return r
+    }
+}
+
+func classifyOne(id: String, text: String, date: String, meta: String, today: String) async -> Resultat {
     let prompt = """
     Aujourd'hui : \(today). Fichier créé le : \(date).
     \(meta)
@@ -190,20 +204,34 @@ func classifyOne(_ text: String, date: String, meta: String, today: String) asyn
         let r = try await session.respond(to: prompt, generating: Analyse.self,
                                           options: GenerationOptions(temperature: 0))
         let a = r.content
-        return ["sujet": a.sujet, "type": a.type, "aVenir": a.aVenir]
+        return Resultat(id: id, sujet: a.sujet, type: a.type, aVenir: a.aVenir, erreur: nil)
     } catch {
         // Le modèle refuse parfois (garde-fous) ou dépasse sa taille de contexte.
-        return ["sujet": "", "type": "autre", "aVenir": false, "error": String(describing: error)]
+        return Resultat(id: id, sujet: "", type: "autre", aVenir: false, erreur: String(describing: error))
     }
 }
 
+// Plusieurs fichiers sont analysés en même temps (« parallel » à la fois, 1 = un par un).
+// Les résultats sortent dans l'ordre où ils finissent : Python les retrouve grâce à leur id.
 func runClassify(_ input: [String: Any]) async {
     let today = input["today"] as? String ?? ""
-    for item in input["items"] as? [[String: Any]] ?? [] {
-        var r = await classifyOne(item["text"] as? String ?? "", date: item["date"] as? String ?? "",
-                                  meta: item["meta"] as? String ?? "", today: today)
-        r["id"] = item["id"] ?? ""
-        emit(r)
+    let parallel = max(1, input["parallel"] as? Int ?? 1)
+    let items = (input["items"] as? [[String: Any]] ?? []).map {
+        (id: "\($0["id"] ?? "")", text: $0["text"] as? String ?? "",
+         date: $0["date"] as? String ?? "", meta: $0["meta"] as? String ?? "")
+    }
+    await withTaskGroup(of: Resultat.self) { group in
+        var next = 0
+        func launch() {
+            let it = items[next]
+            next += 1
+            group.addTask { await classifyOne(id: it.id, text: it.text, date: it.date, meta: it.meta, today: today) }
+        }
+        while next < min(parallel, items.count) { launch() }
+        for await r in group {
+            emit(r.json)
+            if next < items.count { launch() }
+        }
     }
 }
 
