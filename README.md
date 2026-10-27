@@ -56,7 +56,7 @@ screentri --no-open       # n'ouvre pas le navigateur automatiquement
 
 Seuls les fichiers à la racine du dossier sont triés, les sous-dossiers ne sont pas touchés.
 
-La première analyse prend un peu de temps (OCR et IA sur chaque fichier). Les suivantes sont presque instantanées : seuls les fichiers nouveaux ou modifiés sont relus.
+L'interface s'ouvre tout de suite et se remplit pendant l'analyse : une barre montre où elle en est, et chaque fichier apparaît dès qu'il est classé. Les captures vides et les fichiers sensibles s'affichent immédiatement, sans attendre l'IA. La première analyse prend un peu de temps (OCR et IA sur chaque fichier) ; les suivantes sont presque instantanées, car seuls les fichiers nouveaux ou modifiés sont relus.
 
 Dans l'interface (`http://127.0.0.1:8765`) :
 - les fichiers sont regroupés par catégorie, puis par sujet (« Parcoursup », « Projet Plumb », « Facture EDF »…) ;

@@ -34,6 +34,11 @@ main{max-width:1200px;margin:auto;padding:8px 16px 80px}
 .t input{position:absolute;top:6px;left:6px;width:18px;height:18px}
 .gone{color:var(--mut);font-size:12.5px;margin-top:8px}
 .empty{color:var(--mut);padding:30px 0;text-align:center}
+#prog{background:var(--sel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:14px 0 0;display:none}
+#prog.on{display:block}
+#prog .bar{height:6px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
+#prog .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .4s}
+#prog.err{background:transparent;border-color:var(--red);color:var(--red)}
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;z-index:10;flex-direction:column}
 #lb.on{display:flex}
 #lb .bar{display:flex;gap:8px;align-items:center;padding:10px 16px;color:#fff;flex-wrap:wrap}
@@ -62,6 +67,7 @@ main{max-width:1200px;margin:auto;padding:8px 16px 80px}
   <button id="undo" disabled title="Remettre en place la dernière mise à la Corbeille (⌘Z)">↶ Annuler</button>
 </header>
 <main>
+  <div id="prog"><span id="progt"></span><div class="bar"><i id="progb"></i></div></div>
   <div class="tabs" id="tabs"></div>
   <p class="desc" id="gdesc"></p>
   <div id="list"></div>
@@ -234,12 +240,35 @@ async function undo(){
 $("#undo").onclick = undo;
 $("#lbundo").onclick = undo;
 
-fetch("/data").then(r => r.json()).then(j => {
-  D = j; present = new Set(j.present); setUndo(j.undo);
-  $("#folder").textContent = j.folder;
-  document.title = "Tri : " + j.folder.split("/").pop();
-  render();
-});
+function showProgress(st, pending){
+  const p = $("#prog");
+  p.classList.toggle("on", !st.finished || !!st.error);
+  p.classList.toggle("err", !!st.error);
+  if(st.error){ $("#progt").textContent = "Erreur pendant l'analyse : " + st.error; return }
+  if(st.finished) return;
+  const steps = st.total ? ` : ${st.done} / ${st.total}` : "";
+  const wait = pending ? ` · ${pending} fichier(s) pas encore classé(s), ils apparaissent au fur et à mesure` : "";
+  $("#progt").textContent = st.phase + steps + wait;
+  $("#progb").style.width = st.total ? Math.round(100 * st.done / st.total) + "%" : "0";
+}
+
+// Pendant l'analyse, la page redemande les données toutes les 1,5 s et n'affiche que ce qui a changé.
+let version = -1;
+async function load(){
+  try {
+    const j = await (await fetch("/data")).json();
+    if(j.version !== version){
+      version = j.version;
+      D = j; present = new Set(j.present); setUndo(j.undo);
+      $("#folder").textContent = j.folder;
+      document.title = "Tri : " + j.folder.split("/").pop();
+      showProgress(j.status, j.pending);
+      render();
+    }
+    if(!j.status.finished) setTimeout(load, 1500);
+  } catch(e) { setTimeout(load, 3000) }
+}
+load();
 </script>
 </body>
 </html>

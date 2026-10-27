@@ -246,7 +246,7 @@ def merge_topics(items):
 
 def decide(item, today):
     """Choisit la catégorie et explique pourquoi. Renvoie (catégorie, nom de groupe imposé ou None, raison)."""
-    a = item["analysis"]
+    a = item["analysis"] or {}
     age = (today - item["date"]).days
     t = a.get("type") or "autre"
     has_text = bool(item["text"].strip())
@@ -296,20 +296,108 @@ def list_files(folder):
     return sorted(out)
 
 
-def analyze(folder, reanalyze=False):
+class Live:
+    """État partagé entre l'analyse (en arrière-plan) et le serveur : ce qui est prêt à afficher."""
+
+    def __init__(self, folder):
+        import threading
+        self.lock = threading.Lock()
+        self.version = 0
+        self.thumbs = {}
+        self.status = {"phase": "Démarrage…", "done": 0, "total": 0, "finished": False, "error": None}
+        self.data = {"folder": folder, "dups": [], "info": {}, "text": {}, "pending": 0,
+                     "groups": [{"id": cid, "title": t, "desc": d, "items": []} for cid, t, d in CATEGORIES]}
+
+    def publish(self, data=None, thumbs=None, **status):
+        with self.lock:
+            if data is not None:
+                self.data = data
+            if thumbs is not None:
+                self.thumbs = thumbs
+            self.status = {**self.status, **status}
+            self.version += 1
+
+    def snapshot(self):
+        with self.lock:
+            return self.data, self.thumbs, dict(self.status), self.version
+
+
+def can_decide_without_ai(it):
+    """Les captures vides et les données sensibles se classent par règles fixes, sans attendre l'IA."""
+    if not it["text"].strip():
+        return it["kind"] == "image" and is_screenshot(it["file"])
+    return sensitive_reason(it["text"]) is not None
+
+
+def find_dups(items):
+    """Doublons exacts : même taille d'abord, puis même contenu."""
+    by_size = {}
+    for it in items:
+        by_size.setdefault(it["size"], []).append(it)
+    dups = []
+    for same in by_size.values():
+        if len(same) < 2:
+            continue
+        by_hash = {}
+        for it in same:
+            h = hashlib.md5()
+            try:
+                with open(it["path"], "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+            except OSError:
+                continue
+            by_hash.setdefault(h.hexdigest(), []).append(it["file"])
+        dups += [v for v in by_hash.values() if len(v) > 1]
+    return dups
+
+
+def build(folder, items, cache, today, dups):
+    """Catégories et groupes pour les fichiers déjà prêts (analysés, ou classables sans l'IA)."""
+    ready = [it for it in items if it["analysis"] is not None or can_decide_without_ai(it)]
+    theme_of = merge_topics([it for it in ready if it["analysis"] is not None])
+    groups = {c[0]: {} for c in CATEGORIES}
+    info = {}
+    for it in ready:
+        cat, forced_label, why = decide(it, today)
+        label = forced_label or theme_of(it)
+        groups[cat].setdefault(label, []).append(it)
+        ext = os.path.splitext(it["file"])[1].lstrip(".").upper()
+        thumb = cache[it["path"]].get("thumb")
+        info[it["file"]] = {"raison": why, "date": it["date"].strftime("%d/%m/%Y %H:%M"), "kind": it["kind"],
+                            "ext": ext, "size": human_size(it["size"]), "thumb": bool(thumb and os.path.exists(thumb))}
+
+    out_groups = []
+    for cid, title, desc in CATEGORIES:
+        g = groups[cid]
+        labels = sorted(g, key=lambda k: (-len(g[k]), k))
+        out_groups.append({"id": cid, "title": title, "desc": desc, "items": [
+            {"label": lab, "files": [x["file"] for x in sorted(g[lab], key=lambda x: x["date"], reverse=True)]}
+            for lab in labels]})
+    return {"folder": folder, "groups": out_groups, "dups": dups, "info": info,
+            "pending": len(items) - len(ready), "text": {it["file"]: it["text"][:1500] for it in ready}}
+
+
+def analyze(folder, live, reanalyze=False):
+    """Analyse le dossier et publie dans `live` ce qui est prêt, au fur et à mesure."""
     files = list_files(folder)
-    if not files:
-        return None
     cache = {} if reanalyze else load_cache()
 
     def key(p):
         st = os.stat(p)
         return f"v2:{st.st_size}:{int(st.st_mtime)}"
 
+    def safe_key(p):
+        try:
+            return key(p)
+        except OSError:
+            return None
+
     # 1. Lecture du contenu et aperçus des fichiers nouveaux ou modifiés
-    todo = [p for p in files if cache.get(p, {}).get("key") != key(p)]
+    todo = [p for p in files if cache.get(p, {}).get("key") != safe_key(p)]
     if todo:
         log(f"Lecture du contenu et création des aperçus : {len(todo)} fichier(s)…")
+        live.publish(phase="Lecture du contenu des fichiers", done=0, total=len(todo))
         n = [0]
 
         def got(o):
@@ -320,7 +408,8 @@ def analyze(folder, reanalyze=False):
                 text = office_text(p) or text
             if o.get("kind") == "html":
                 text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<(script|style)[\s\S]*?</\1>|<[^>]+>", " ", text)))
-            cache[p] = {"key": key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb")}
+            cache[p] = {"key": safe_key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb")}
+            live.publish(done=n[0])
             if n[0] % 20 == 0 or n[0] == len(todo):
                 log(f"  {n[0]}/{len(todo)}")
                 save_cache(cache)
@@ -332,9 +421,14 @@ def analyze(folder, reanalyze=False):
         c = cache.get(p)
         if not c:
             continue
-        items.append({"path": p, "file": os.path.basename(p), "text": c.get("text", ""), "kind": c.get("kind", "other"),
-                      "size": os.path.getsize(p), "date": capture_date(p), "analysis": c.get("analysis")})
+        try:
+            items.append({"path": p, "file": os.path.basename(p), "text": c.get("text", ""),
+                          "kind": c.get("kind", "other"), "size": os.path.getsize(p), "date": capture_date(p),
+                          "analysis": c.get("analysis")})
+        except OSError:
+            continue  # mis à la Corbeille ou déplacé entre-temps
     items.sort(key=lambda x: x["date"])
+    thumbs = {it["file"]: cache[it["path"]].get("thumb") for it in items}
 
     # 2. Rafales : fichiers du même genre créés à moins de 5 min d'écart, avec un texte très proche
     bursts, cur = [], []
@@ -352,16 +446,29 @@ def analyze(folder, reanalyze=False):
     if cur:
         bursts.append(cur)
 
-    # 3. Analyse par le modèle d'Apple : une fois par rafale (sur le fichier le plus riche)
+    # Fichiers déjà analysés lors d'un lancement précédent : la rafale reprend l'analyse de son représentant
+    for b in bursts:
+        rep = max(b, key=lambda x: len(x["text"]))
+        if rep["analysis"] is not None:
+            for it in b:
+                it["analysis"] = it["analysis"] or rep["analysis"]
+
     today = dt.datetime.now()
+    dups = find_dups(items)
+
+    # 3. Analyse par le modèle d'Apple : une fois par rafale (sur le fichier le plus riche)
     need = []
     for i, b in enumerate(bursts):
         rep = max(b, key=lambda x: len(x["text"]))
-        empty_shot = not rep["text"].strip() and rep["kind"] == "image" and is_screenshot(rep["file"])
-        if rep["analysis"] is None and not empty_shot:
+        # Captures vides et données sensibles : les règles fixes suffisent, pas besoin de l'IA
+        if rep["analysis"] is None and not can_decide_without_ai(rep):
             meta = (f"Nom du fichier : {rep['file']} — genre : {KIND_LABEL.get(rep['kind'], 'fichier')}"
                     f" — taille : {human_size(rep['size'])}")
             need.append({"id": str(i), "text": rep["text"], "date": rep["date"].strftime("%d/%m/%Y"), "meta": meta})
+
+    # Ce qui est déjà prêt s'affiche tout de suite dans l'interface
+    live.publish(data=build(folder, items, cache, today, dups), thumbs=thumbs,
+                 phase="Analyse par l'IA d'Apple", done=0, total=len(need))
     if need:
         log(f"Analyse par le modèle d'Apple : {len(need)} fichier(s) ou rafale(s)…")
         n = [0]
@@ -372,61 +479,21 @@ def analyze(folder, reanalyze=False):
             for it in bursts[int(o["id"])]:
                 it["analysis"] = res
                 cache[it["path"]]["analysis"] = res
+            live.publish(data=build(folder, items, cache, today, dups), done=n[0])
             if n[0] % 10 == 0 or n[0] == len(need):
                 log(f"  {n[0]}/{len(need)}")
                 save_cache(cache)
         engine("classify", {"today": today.strftime("%d/%m/%Y"), "items": need}, got_cls)
         save_cache(cache)
-    for b in bursts:
-        rep = max(b, key=lambda x: len(x["text"]))
-        for it in b:
-            it["analysis"] = it["analysis"] or rep["analysis"] or {"sujet": "", "type": "autre"}
-
-    # 4. Regroupement des sujets proches, puis catégories
-    theme_of = merge_topics(items)
-    groups = {c[0]: {} for c in CATEGORIES}
-    info = {}
     for it in items:
-        cat, forced_label, why = decide(it, today)
-        label = forced_label or theme_of(it)
-        groups[cat].setdefault(label, []).append(it)
-        ext = os.path.splitext(it["file"])[1].lstrip(".").upper()
-        info[it["file"]] = {"raison": why,
-                            "date": it["date"].strftime("%d/%m/%Y %H:%M"), "kind": it["kind"],
-                            "ext": ext, "size": human_size(it["size"]),
-                            "thumb": bool(cache[it["path"]].get("thumb") and os.path.exists(cache[it["path"]]["thumb"]))}
+        it["analysis"] = it["analysis"] or {"sujet": "", "type": "autre"}
 
-    out_groups = []
-    for cid, title, desc in CATEGORIES:
-        g = groups[cid]
-        labels = sorted(g, key=lambda k: (-len(g[k]), k))
-        out_groups.append({"id": cid, "title": title, "desc": desc, "items": [
-            {"label": lab, "files": [x["file"] for x in sorted(g[lab], key=lambda x: x["date"], reverse=True)]}
-            for lab in labels]})
-
-    # 5. Doublons exacts (même taille d'abord, puis même contenu)
-    by_size = {}
-    for it in items:
-        by_size.setdefault(it["size"], []).append(it)
-    dups = []
-    for same in by_size.values():
-        if len(same) < 2:
-            continue
-        by_hash = {}
-        for it in same:
-            h = hashlib.md5()
-            with open(it["path"], "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    h.update(chunk)
-            by_hash.setdefault(h.hexdigest(), []).append(it["file"])
-        dups += [v for v in by_hash.values() if len(v) > 1]
-
-    thumbs = {it["file"]: cache[it["path"]].get("thumb") for it in items}
-    return {"folder": folder, "groups": out_groups, "dups": dups, "info": info,
-            "text": {it["file"]: it["text"][:1500] for it in items}}, thumbs
+    data = build(folder, items, cache, today, dups)
+    live.publish(data=data, phase="Terminé", finished=True)
+    return data
 
 
-def make_handler(folder, data, thumbs, token, page):
+def make_handler(folder, live, token, page):
     def safe_path(name):
         if not name or "/" in name or "\\" in name or name.startswith(".") or name in SKIP_NAMES:
             return None
@@ -497,8 +564,10 @@ def make_handler(folder, data, thumbs, token, page):
             if u.path == "/":
                 return self.send(200, page.replace("__TOKEN__", token), "text/html; charset=utf-8")
             if u.path == "/data":
+                data, _, status, version = live.snapshot()
                 present = sorted(f for f in os.listdir(folder) if not f.startswith("."))
-                return self.send(200, json.dumps({**data, "present": present, "undo": undo_count()}, ensure_ascii=False))
+                return self.send(200, json.dumps({**data, "present": present, "undo": undo_count(),
+                                                  "status": status, "version": version}, ensure_ascii=False))
             for prefix in ("/thumb/", "/file/", "/preview/", "/text/"):
                 if u.path.startswith(prefix):
                     name = urllib.parse.unquote(u.path[len(prefix):])
@@ -509,7 +578,7 @@ def make_handler(folder, data, thumbs, token, page):
             self.send(404, "{}")
 
         def get_thumb(self, p, name):
-            t = thumbs.get(name)
+            t = live.snapshot()[1].get(name)
             if not t or not os.path.exists(t):
                 return self.send(404, "{}")
             self.send_file(t, "image/jpeg")
@@ -523,7 +592,7 @@ def make_handler(folder, data, thumbs, token, page):
 
         def get_preview(self, p, name):
             """Grand aperçu Quick Look (première page / diapo) pour les formats que le navigateur ne lit pas."""
-            if not thumbs.get(name):
+            if not live.snapshot()[1].get(name):
                 # Quick Look n'a pas su lire ce fichier pendant l'analyse : inutile de réessayer.
                 return self.send(404, "{}")
             st = os.stat(p)
@@ -637,8 +706,6 @@ def make_handler(folder, data, thumbs, token, page):
             save_undo(stack)
             return {"restored": restored, "failed": failed, "undo": len(ops)}
 
-    data["undo"] = undo_count()
-
     return H
 
 
@@ -660,17 +727,14 @@ def main():
         sys.exit("Le modèle d'IA d'Apple n'est pas disponible (Apple Intelligence doit être activé).")
 
     log(f"Dossier : {folder}")
-    res = analyze(folder, args.reanalyze)
-    if res is None:
+    if not list_files(folder):
         sys.exit("Aucun fichier dans ce dossier.")
-    data, thumbs = res
-    counts = {g["id"]: sum(len(i["files"]) for i in g["items"]) for g in data["groups"]}
-    log("Résultat : " + ", ".join(f"{counts[c]} {c}" for c in ("supprimer", "verifier", "garder", "sensible")))
 
     with open(os.path.join(HERE, "ui.html"), encoding="utf-8") as f:
         page = f.read()
     token = secrets.token_hex(16)
-    handler = make_handler(folder, data, thumbs, token, page)
+    live = Live(folder)
+    handler = make_handler(folder, live, token, page)
     for port in range(args.port, args.port + 20):
         try:
             server = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -681,6 +745,19 @@ def main():
         sys.exit("Aucun port libre.")
     url = f"http://127.0.0.1:{port}/"
     log(f"Interface : {url}  (Ctrl+C pour arrêter)")
+
+    # L'interface s'ouvre tout de suite et se remplit pendant que l'analyse avance.
+    def run():
+        try:
+            data = analyze(folder, live, args.reanalyze)
+            counts = {g["id"]: sum(len(i["files"]) for i in g["items"]) for g in data["groups"]}
+            log("Résultat : " + ", ".join(f"{counts[c]} {c}" for c in ("supprimer", "verifier", "garder", "sensible")))
+        except Exception as e:
+            log(f"Erreur pendant l'analyse : {e}")
+            live.publish(phase="Erreur", error=str(e), finished=True)
+
+    import threading
+    threading.Thread(target=run, daemon=True).start()
     if not args.no_open:
         webbrowser.open(url)
     try:
