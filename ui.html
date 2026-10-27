@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tri des fichiers</title>
+<style>
+:root{--bg:#f6f5f2;--fg:#1d1d1b;--mut:#6b6b66;--card:#fff;--line:#e2e0d9;--acc:#2f5bd3;--red:#c8372d;--sel:#e8eefc}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe6;--mut:#9b9a94;--card:#1e1e1c;--line:#34332f;--acc:#8aa6ff;--red:#ff7a6e;--sel:#24304f}}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:17px;margin:0}
+header .folder{color:var(--mut);font-size:12.5px;margin-right:auto;word-break:break-all}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.danger{background:var(--red);border-color:var(--red);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+main{max-width:1200px;margin:auto;padding:8px 16px 80px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+.tabs button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.desc{color:var(--mut);margin:0 0 10px}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:12px 0;padding:12px 14px}
+.sec h3{font-size:14.5px;font-weight:600;margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sec h3 .n{color:var(--mut);font-weight:400;font-size:12.5px}
+.sec h3 .sp{margin-left:auto;display:flex;gap:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px}
+.t{position:relative;border:2px solid transparent;border-radius:8px;overflow:hidden;background:var(--bg);cursor:pointer}
+.t.sel{border-color:var(--acc);background:var(--sel)}
+.t img{display:block;width:100%;height:100px;object-fit:cover;object-position:top}
+.t .ico{height:100px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--mut);letter-spacing:.5px}
+.t .meta{font-size:10.5px;padding:0 6px 4px;color:var(--mut)}
+.t .cap{font-size:11px;padding:4px 6px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t input{position:absolute;top:6px;left:6px;width:18px;height:18px}
+.gone{color:var(--mut);font-size:12.5px;margin-top:8px}
+.empty{color:var(--mut);padding:30px 0;text-align:center}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;z-index:10;flex-direction:column}
+#lb.on{display:flex}
+#lb .bar{display:flex;gap:8px;align-items:center;padding:10px 16px;color:#fff;flex-wrap:wrap}
+#lb .bar .name{margin-right:auto;font-size:13px;word-break:break-all}
+#lb .body{flex:1;display:flex;gap:16px;padding:0 16px 16px;min-height:0}
+#lb .view{flex:1;min-width:0;display:flex;align-items:center;justify-content:center}
+#lb .view>*{max-width:100%;max-height:100%}
+#lb .view img{object-fit:contain}
+#lb .view iframe{width:100%;height:100%;border:0;background:#fff;border-radius:6px}
+#lb .view video{width:100%}
+#lb .view pre{width:100%;height:100%;overflow:auto;margin:0;background:#1b1b1b;color:#e6e6e6;padding:14px;border-radius:6px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+#lb .view .aud{display:flex;flex-direction:column;gap:16px;align-items:center}
+#lb .ocr{width:300px;overflow:auto;color:#ddd;font-size:12px;white-space:pre-wrap;background:#222;border-radius:8px;padding:10px}
+#lb .ocr b{color:#fff}
+@media(max-width:700px){#lb .ocr{display:none}}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;display:none;z-index:20}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tri des fichiers</h1>
+  <span class="folder" id="folder"></span>
+  <span id="selc" class="desc" style="margin:0">0 sélectionné</span>
+  <button id="clr">Désélectionner</button>
+  <button id="bulk" class="danger" disabled>Mettre la sélection à la Corbeille</button>
+  <button id="undo" disabled title="Remettre en place la dernière mise à la Corbeille (⌘Z)">↶ Annuler</button>
+</header>
+<main>
+  <div class="tabs" id="tabs"></div>
+  <p class="desc" id="gdesc"></p>
+  <div id="list"></div>
+</main>
+<div id="lb">
+  <div class="bar">
+    <span class="name" id="lbn"></span>
+    <button id="lbprev">←</button><button id="lbnext">→</button>
+    <button id="lbopen">Ouvrir avec l'app</button>
+    <button id="lbtrash" class="danger">Mettre à la Corbeille</button>
+    <button id="lbundo" disabled title="⌘Z">↶ Annuler</button>
+    <button id="lbclose">Fermer (Échap)</button>
+  </div>
+  <div class="body"><div class="view" id="lbview"></div><div class="ocr" id="lbocr"></div></div>
+</div>
+<div id="toast"></div>
+<script>
+const TOKEN = "__TOKEN__";
+let D, present, cur = "supprimer", sel = new Set(), lbList = [], lbI = 0, lbSec = null, undoN = 0;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const u = (k, f) => `/${k}/` + encodeURIComponent(f);
+const inf = f => (D.info && D.info[f]) || {};
+
+function toast(m){const t=$("#toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2500)}
+
+async function post(path, files){
+  const r = await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:JSON.stringify({files})});
+  return r.json();
+}
+
+async function trash(files){
+  files = files.filter(f => present.has(f));
+  if(!files.length) return;
+  if(!confirm(files.length === 1 ? `Mettre « ${files[0]} » à la Corbeille ?` : `Mettre ${files.length} fichiers à la Corbeille ?`)) return;
+  const r = await post("/trash", files);
+  r.done.forEach(f => {present.delete(f); sel.delete(f)});
+  setUndo(r.undo);
+  toast(`${r.done.length} mis à la Corbeille` + (r.failed.length ? `, ${r.failed.length} en échec` : "") + (r.done.length ? " · ⌘Z pour annuler" : ""));
+  render();
+  return r.done;
+}
+
+function updSel(){
+  $("#selc").textContent = sel.size + (sel.size > 1 ? " sélectionnés" : " sélectionné");
+  $("#bulk").disabled = !sel.size;
+}
+
+function render(){
+  const tabs = D.groups.map(g => {
+    const n = new Set(g.items.flatMap(i => i.files).filter(f => present.has(f))).size;
+    return `<button data-g="${g.id}" class="${g.id===cur?"on":""}">${esc(g.title)} (${n})</button>`;
+  }).join("") + `<button data-g="dups" class="${cur==="dups"?"on":""}">Doublons exacts (${D.dups.length})</button>`;
+  $("#tabs").innerHTML = tabs;
+  let sections;
+  if(cur === "dups"){
+    $("#gdesc").textContent = "Fichiers identiques octet par octet : tu peux n'en garder qu'un par groupe.";
+    sections = D.dups.map((p,i) => ({label:"Groupe " + (i+1), files:p}));
+  } else {
+    const g = D.groups.find(g => g.id === cur);
+    $("#gdesc").textContent = g.desc;
+    sections = g.items;
+  }
+  $("#list").innerHTML = sections.length ? sections.map((s, si) => {
+    const live = s.files.filter(f => present.has(f));
+    const gone = s.files.length - live.length;
+    return `<div class="sec"><h3>${esc(s.label)}<span class="n">${live.length} fichier(s)</span>
+      <span class="sp">${live.length ? `<button data-selall="${si}">Tout sélectionner</button><button class="danger" data-trashall="${si}">Tout à la Corbeille</button>` : ""}</span></h3>
+      ${live.length ? `<div class="grid">${live.map(f => `<div class="t ${sel.has(f)?"sel":""}" data-f="${esc(f)}" data-s="${si}">
+        <input type="checkbox" ${sel.has(f)?"checked":""} title="Sélectionner">
+        ${inf(f).thumb ? `<img loading="lazy" src="${u("thumb",f)}" alt="">` : `<div class="ico">${esc(inf(f).ext || "?")}</div>`}<div class="cap" title="${esc(f)}">${esc(f.replace(/^(Screenshot|Capture d’écran|Capture d'écran) /,""))}</div><div class="meta">${esc(inf(f).ext||"")} · ${esc(inf(f).size||"")}</div></div>`).join("")}</div>` : ""}
+      ${gone ? `<div class="gone">${gone} déjà mis à la Corbeille ou absent(s)</div>` : ""}</div>`;
+  }).join("") : `<div class="empty">Rien dans cette catégorie.</div>`;
+  window._sections = sections;
+  updSel();
+}
+
+document.addEventListener("click", async e => {
+  const tab = e.target.closest("[data-g]");
+  if(tab){cur = tab.dataset.g; render(); scrollTo(0,0); return}
+  const sa = e.target.closest("[data-selall]");
+  if(sa){_sections[sa.dataset.selall].files.filter(f=>present.has(f)).forEach(f=>sel.add(f)); render(); return}
+  const ta = e.target.closest("[data-trashall]");
+  if(ta){await trash(_sections[ta.dataset.trashall].files); return}
+  const t = e.target.closest(".t");
+  if(t){
+    const f = t.dataset.f;
+    if(e.target.tagName === "INPUT"){ e.target.checked ? sel.add(f) : sel.delete(f); t.classList.toggle("sel", e.target.checked); updSel(); return }
+    lbList = _sections[t.dataset.s].files.filter(x => present.has(x));
+    lbSec = _sections[t.dataset.s]; lbI = lbList.indexOf(f); showLb(); return;
+  }
+});
+
+function showLb(){
+  if(!lbList.length){ $("#lb").classList.remove("on"); $("#lbview").innerHTML = ""; return }
+  lbI = Math.max(0, Math.min(lbI, lbList.length - 1));
+  const f = lbList[lbI], i = inf(f), v = $("#lbview");
+  $("#lbn").textContent = `${f}  (${lbI+1}/${lbList.length})`;
+  v.innerHTML = "";
+  if(i.kind === "image"){
+    v.innerHTML = `<img src="${u("file",f)}" alt="">`;
+  } else if(i.kind === "pdf"){
+    v.innerHTML = `<iframe src="${u("file",f)}"></iframe>`;
+  } else if(i.kind === "video"){
+    v.innerHTML = `<video controls preload="metadata" src="${u("file",f)}" ${i.thumb ? `poster="${u("thumb",f)}"` : ""}></video>`;
+  } else if(i.kind === "audio"){
+    v.innerHTML = `<div class="aud">${i.thumb ? `<img src="${u("thumb",f)}" alt="" style="max-height:300px">` : ""}<audio controls src="${u("file",f)}"></audio></div>`;
+  } else if(i.kind === "text" || i.kind === "html"){
+    const pre = document.createElement("pre"); pre.textContent = "Chargement…"; v.appendChild(pre);
+    fetch(u("text",f)).then(r => r.json()).then(j => { if(lbList[lbI] === f) pre.textContent = j.text });
+  } else {
+    // Word, PowerPoint, Excel, Pages, Keynote… : grand aperçu Quick Look de la première page
+    const im = new Image(); im.alt = "";
+    im.onerror = () => { const d = document.createElement("div"); d.className = "ico"; d.style.fontSize = "48px"; d.style.color = "#aaa"; d.textContent = i.ext || "?"; im.replaceWith(d) };
+    im.src = u("preview", f); v.appendChild(im);
+  }
+  $("#lbocr").innerHTML =
+    `<b>${esc(i.ext||"")} · ${esc(i.size||"")}</b>\n` +
+    (i.raison ? `<b>Pourquoi ici :</b> ${esc(i.raison)}\n` : "") +
+    (i.date ? `<b>Date :</b> ${esc(i.date)}\n` : "") +
+    (i.resume ? `<b>Résumé :</b> ${esc(i.resume)}\n` : "") +
+    `\n<b>Texte détecté :</b>\n\n${esc(D.text[f] || "(aucun)")}`;
+  $("#lb").classList.add("on");
+}
+$("#lbclose").onclick = () => { $("#lb").classList.remove("on"); $("#lbview").innerHTML = ""; };
+$("#lbprev").onclick = () => {lbI--; showLb()};
+$("#lbnext").onclick = () => {lbI++; showLb()};
+$("#lbopen").onclick = () => post("/open", [lbList[lbI]]);
+$("#lbtrash").onclick = async () => {
+  const done = await trash([lbList[lbI]]);
+  if(done && done.length){ lbList.splice(lbI, 1); showLb() }
+};
+document.addEventListener("keydown", e => {
+  if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey){ e.preventDefault(); undo(); return }
+  if(!$("#lb").classList.contains("on")) return;
+  if(e.key === "Escape") $("#lbclose").click();
+  if(e.key === "ArrowLeft") $("#lbprev").click();
+  if(e.key === "ArrowRight") $("#lbnext").click();
+});
+$("#clr").onclick = () => {sel.clear(); render()};
+$("#bulk").onclick = () => trash([...sel]);
+
+function setUndo(n){
+  undoN = n || 0;
+  for(const b of [$("#undo"), $("#lbundo")]){
+    b.disabled = !undoN;
+    b.textContent = undoN ? `↶ Annuler (${undoN})` : "↶ Annuler";
+  }
+}
+
+let undoing = false;
+async function undo(){
+  if(!undoN || undoing) return;
+  undoing = true;
+  try {
+    const r = await post("/undo", []);
+    r.restored.forEach(f => present.add(f));
+    setUndo(r.undo);
+    if(!r.restored.length && !r.failed.length){ toast("Rien à annuler"); return }
+    toast(`${r.restored.length} remis en place` + (r.failed.length ? ` · ${r.failed.length} introuvable(s) dans la Corbeille` : ""));
+    render();
+    // Si la vue agrandie est ouverte, on y remontre le fichier restauré.
+    if($("#lb").classList.contains("on") && lbSec){
+      lbList = lbSec.files.filter(x => present.has(x));
+      const back = lbList.findIndex(x => r.restored.includes(x));
+      if(back >= 0) lbI = back;
+      showLb();
+    }
+  } finally { undoing = false }
+}
+$("#undo").onclick = undo;
+$("#lbundo").onclick = undo;
+
+fetch("/data").then(r => r.json()).then(j => {
+  D = j; present = new Set(j.present); setUndo(j.undo);
+  $("#folder").textContent = j.folder;
+  document.title = "Tri : " + j.folder.split("/").pop();
+  render();
+});
+</script>
+</body>
+</html>
