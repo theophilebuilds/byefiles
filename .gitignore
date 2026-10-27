@@ -1,0 +1,9 @@
+# Binaire compilé depuis analyze.swift
+bin/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
