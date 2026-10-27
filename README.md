@@ -60,7 +60,7 @@ La première analyse prend un peu de temps (OCR et IA sur chaque fichier). Les s
 
 Dans l'interface (`http://127.0.0.1:8765`) :
 - les fichiers sont regroupés par catégorie, puis par sujet (« Parcoursup », « Projet Plumb », « Facture EDF »…) ;
-- chaque fichier affiche un résumé d'une phrase et **la raison** de son classement (ex. « démarche ancienne (142 j), sans doute terminée ») ;
+- dans la vue agrandie, chaque fichier affiche **la raison** de son classement (ex. « démarche ancienne (142 j), sans doute terminée ») ;
 - un clic ouvre la vue agrandie : PDF lisible, vidéo et son jouables, texte affiché, première page pour Word, PowerPoint ou Pages ;
 - « Corbeille » envoie la sélection dans la Corbeille de macOS, et « Annuler » remet les fichiers à leur place ;
 - les doublons exacts sont signalés à part.
@@ -80,7 +80,7 @@ Dans l'interface (`http://127.0.0.1:8765`) :
    │
    ▼
  3. Analyse IA ──────────── Swift : Foundation Models (modèle d'Apple, local)
-   │   sujet, type, échéance à venir, résumé
+   │   sujet, type, échéance à venir
    ▼
  4. Règles de tri ───────── Python : fonction decide()
    │   catégorie + raison
@@ -119,7 +119,6 @@ struct Analyse {
     var sujet: String    // « Parcoursup », « Facture EDF »…
     var type: String     // une valeur parmi 14 : projet_travail, administratif, inspiration…
     var aVenir: Bool     // billet, rendez-vous ou échéance après aujourd'hui ?
-    var resume: String   // une phrase
 }
 ```
 
@@ -177,7 +176,7 @@ Les deux programmes communiquent en JSON : Python envoie la liste des fichiers s
 ```sh
 bin/screentri-analyze check      # le modèle d'Apple est-il disponible ?
 bin/screentri-analyze extract    # {"files":[…],"thumbs":"…"}  →  texte + aperçu par fichier
-bin/screentri-analyze classify   # {"today":"…","items":[…]}    →  sujet, type, aVenir, résumé
+bin/screentri-analyze classify   # {"today":"…","items":[…]}    →  sujet, type, aVenir
 ```
 
 ## Personnaliser

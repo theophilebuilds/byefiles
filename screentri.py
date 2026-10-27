@@ -368,7 +368,7 @@ def analyze(folder, reanalyze=False):
 
         def got_cls(o):
             n[0] += 1
-            res = {k: o.get(k) for k in ("sujet", "type", "aVenir", "resume")}
+            res = {k: o.get(k) for k in ("sujet", "type", "aVenir")}
             for it in bursts[int(o["id"])]:
                 it["analysis"] = res
                 cache[it["path"]]["analysis"] = res
@@ -391,7 +391,7 @@ def analyze(folder, reanalyze=False):
         label = forced_label or theme_of(it)
         groups[cat].setdefault(label, []).append(it)
         ext = os.path.splitext(it["file"])[1].lstrip(".").upper()
-        info[it["file"]] = {"resume": it["analysis"].get("resume") or "", "raison": why,
+        info[it["file"]] = {"raison": why,
                             "date": it["date"].strftime("%d/%m/%Y %H:%M"), "kind": it["kind"],
                             "ext": ext, "size": human_size(it["size"]),
                             "thumb": bool(cache[it["path"]].get("thumb") and os.path.exists(cache[it["path"]]["thumb"]))}

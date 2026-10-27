@@ -182,7 +182,6 @@ function showLb(){
     `<b>${esc(i.ext||"")} · ${esc(i.size||"")}</b>\n` +
     (i.raison ? `<b>Pourquoi ici :</b> ${esc(i.raison)}\n` : "") +
     (i.date ? `<b>Date :</b> ${esc(i.date)}\n` : "") +
-    (i.resume ? `<b>Résumé :</b> ${esc(i.resume)}\n` : "") +
     `\n<b>Texte détecté :</b>\n\n${esc(D.text[f] || "(aucun)")}`;
   $("#lb").classList.add("on");
 }

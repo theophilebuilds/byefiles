@@ -3,7 +3,7 @@
 // Modes (entrée JSON sur stdin, sortie JSON ligne par ligne sur stdout) :
 //   check     -> dit si le modèle d'Apple est disponible
 //   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb"} par ligne
-//   classify  -> {"today","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir","resume"} par ligne
+//   classify  -> {"today","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir"} par ligne
 import AppKit
 import Foundation
 import FoundationModels
@@ -155,8 +155,6 @@ struct Analyse {
     var type: String
     @Guide(description: "true seulement si le contenu montre un billet, un rendez-vous, une réservation ou une échéance dont la date est après aujourd'hui")
     var aVenir: Bool
-    @Guide(description: "Résumé neutre en une phrase courte, en français")
-    var resume: String
 }
 
 let instructionsClassify = """
@@ -192,10 +190,10 @@ func classifyOne(_ text: String, date: String, meta: String, today: String) asyn
         let r = try await session.respond(to: prompt, generating: Analyse.self,
                                           options: GenerationOptions(temperature: 0))
         let a = r.content
-        return ["sujet": a.sujet, "type": a.type, "aVenir": a.aVenir, "resume": a.resume]
+        return ["sujet": a.sujet, "type": a.type, "aVenir": a.aVenir]
     } catch {
         // Le modèle refuse parfois (garde-fous) ou dépasse sa taille de contexte.
-        return ["sujet": "", "type": "autre", "aVenir": false, "resume": "", "error": String(describing: error)]
+        return ["sujet": "", "type": "autre", "aVenir": false, "error": String(describing: error)]
     }
 }
 
