@@ -77,6 +77,27 @@ func thumbnail(_ url: URL, to out: String, size: CGFloat) -> CGImage? {
     return cg
 }
 
+// MARK: - Empreinte visuelle (dHash)
+
+// Image réduite à 9×8 pixels en gris : chaque bit dit si un pixel est plus clair que son voisin de droite.
+// Deux images qui se ressemblent ont des empreintes qui ne diffèrent que de quelques bits.
+func dHash(_ cg: CGImage) -> String? {
+    let w = 9, h = 8
+    var px = [UInt8](repeating: 0, count: w * h)
+    guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                              space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+    else { return nil }
+    ctx.interpolationQuality = .medium
+    ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+    var bits: UInt64 = 0
+    for y in 0..<h {
+        for x in 0..<(w - 1) {
+            bits = bits << 1 | (px[y * w + x] > px[y * w + x + 1] ? 1 : 0)
+        }
+    }
+    return String(format: "%016llx", bits)
+}
+
 // MARK: - Extraction du texte
 
 func extract(_ path: String, thumbsDir: String) -> [String: Any] {
@@ -123,7 +144,10 @@ func extract(_ path: String, thumbsDir: String) -> [String: Any] {
         text = ocrCG(cg)
     }
     var r: [String: Any] = ["path": path, "kind": kind, "text": String(text.prefix(20_000))]
-    if thumbCG != nil { r["thumb"] = thumbPath }
+    if let cg = thumbCG {
+        r["thumb"] = thumbPath
+        if kind == "image", let h = dHash(cg) { r["dhash"] = h }
+    }
     return r
 }
 

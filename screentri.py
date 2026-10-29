@@ -354,7 +354,9 @@ def series_name(it):
 def similar_groups(items):
     """Regroupe les fichiers qui montrent la même chose. Liens :
     - rafale : même genre, créés à moins de 5 min d'écart, texte proche (items triés par date) ;
-    - série : même nom aux suffixes de copie près (« x (1).pdf »), même extension, taille à 20 % près."""
+    - série : même nom aux suffixes de copie près (« x (1).pdf »), même extension, taille à 20 % près ;
+    - image quasi identique : empreintes visuelles à 3 bits ou moins (même capture redimensionnée,
+      recadrée de peu ou réenregistrée). Deux pages différentes d'un même document sont à 6 bits ou plus."""
     parent = list(range(len(items)))
 
     def find(i):
@@ -382,6 +384,13 @@ def similar_groups(items):
                 link(i, j)
                 break
         by_name.setdefault(series_name(it), []).append(i)
+
+    hashed = [(i, int(it["dhash"], 16)) for i, it in enumerate(items) if it["kind"] == "image" and it.get("dhash")]
+    for x, (i, hi) in enumerate(hashed):
+        for j, hj in hashed[:x]:
+            if bin(hi ^ hj).count("1") <= 3:
+                link(i, j)
+                break
 
     groups = {}
     for i, it in enumerate(items):
@@ -471,7 +480,8 @@ def analyze(folder, live, reanalyze=False):
                 text = office_text(p) or text
             if o.get("kind") == "html":
                 text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<(script|style)[\s\S]*?</\1>|<[^>]+>", " ", text)))
-            cache[p] = {"key": safe_key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb")}
+            cache[p] = {"key": safe_key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb"),
+                        "dhash": o.get("dhash")}
             live.publish(done=n[0])
             if n[0] % 20 == 0 or n[0] == len(todo):
                 log(f"  {n[0]}/{len(todo)}")
@@ -487,7 +497,7 @@ def analyze(folder, live, reanalyze=False):
         try:
             items.append({"path": p, "file": os.path.basename(p), "text": c.get("text", ""),
                           "kind": c.get("kind", "other"), "size": os.path.getsize(p), "date": capture_date(p),
-                          "analysis": c.get("analysis")})
+                          "analysis": c.get("analysis"), "dhash": c.get("dhash")})
         except OSError:
             continue  # mis à la Corbeille ou déplacé entre-temps
     items.sort(key=lambda x: x["date"])
