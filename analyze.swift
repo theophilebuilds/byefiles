@@ -2,8 +2,9 @@
 // Tout tourne sur le Mac, rien n'est envoyé sur internet.
 // Modes (entrée JSON sur stdin, sortie JSON ligne par ligne sur stdout) :
 //   check     -> dit si le modèle d'Apple est disponible
-//   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb"} par ligne
-//   classify  -> {"today","parallel","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir"} par ligne
+//   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb","dhash"} par ligne
+//   classify  -> une ligne {"today","parallel"}, puis une ligne {"id","text","date","meta"} par fichier,
+//                envoyées au fil de l'eau => {"id","sujet","type","aVenir"} par ligne
 import AppKit
 import Foundation
 import FoundationModels
@@ -13,11 +14,15 @@ import UniformTypeIdentifiers
 import Vision
 import CryptoKit
 
+let emitLock = NSLock()
+
 func emit(_ obj: [String: Any]) {
     if let d = try? JSONSerialization.data(withJSONObject: obj),
        let s = String(data: d, encoding: .utf8) {
+        emitLock.lock()
         print(s)
         fflush(stdout)
+        emitLock.unlock()
     }
 }
 
@@ -57,10 +62,10 @@ func cgFromFile(_ path: String) -> CGImage? {
     NSImage(contentsOfFile: path)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
 }
 
-// MARK: - Aperçu Quick Look (JPEG, 900 px max)
+// MARK: - Aperçu Quick Look (JPEG)
 
-func thumbnail(_ url: URL, to out: String) -> CGImage? {
-    let req = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 900, height: 900),
+func thumbnail(_ url: URL, to out: String, size: CGFloat) -> CGImage? {
+    let req = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: size, height: size),
                                            scale: 1, representationTypes: .thumbnail)
     let sem = DispatchSemaphore(value: 0)
     var result: CGImage?
@@ -77,6 +82,27 @@ func thumbnail(_ url: URL, to out: String) -> CGImage? {
     return cg
 }
 
+// MARK: - Empreinte visuelle (dHash)
+
+// Image réduite à 9×8 pixels en gris : chaque bit dit si un pixel est plus clair que son voisin de droite.
+// Deux images qui se ressemblent ont des empreintes qui ne diffèrent que de quelques bits.
+func dHash(_ cg: CGImage) -> String? {
+    let w = 9, h = 8
+    var px = [UInt8](repeating: 0, count: w * h)
+    guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                              space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+    else { return nil }
+    ctx.interpolationQuality = .medium
+    ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+    var bits: UInt64 = 0
+    for y in 0..<h {
+        for x in 0..<(w - 1) {
+            bits = bits << 1 | (px[y * w + x] > px[y * w + x + 1] ? 1 : 0)
+        }
+    }
+    return String(format: "%016llx", bits)
+}
+
 // MARK: - Extraction du texte
 
 func extract(_ path: String, thumbsDir: String) -> [String: Any] {
@@ -84,7 +110,6 @@ func extract(_ path: String, thumbsDir: String) -> [String: Any] {
     let kind = kindOf(url)
     let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined().prefix(24)
     let thumbPath = "\(thumbsDir)/\(hash).jpg"
-    let thumbCG = thumbnail(url, to: thumbPath)
     var text = ""
 
     switch kind {
@@ -116,12 +141,18 @@ func extract(_ path: String, thumbsDir: String) -> [String: Any] {
     default:
         break
     }
-    // Rien d'exploitable : on lit le texte visible dans l'aperçu (slides, Pages, vidéo…)
-    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, kind != "image", let cg = thumbCG {
+    // Miniature de 300 px pour la grille. Quand il n'y a aucun texte à lire (slides, Pages, vidéo…),
+    // on la fait en 900 px pour lire en OCR le texte visible dessus.
+    let needsOCR = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && kind != "image"
+    let thumbCG = thumbnail(url, to: thumbPath, size: needsOCR ? 900 : 300)
+    if needsOCR, let cg = thumbCG {
         text = ocrCG(cg)
     }
     var r: [String: Any] = ["path": path, "kind": kind, "text": String(text.prefix(20_000))]
-    if thumbCG != nil { r["thumb"] = thumbPath }
+    if let cg = thumbCG {
+        r["thumb"] = thumbPath
+        if kind == "image", let h = dHash(cg) { r["dhash"] = h }
+    }
     return r
 }
 
@@ -211,26 +242,36 @@ func classifyOne(id: String, text: String, date: String, meta: String, today: St
     }
 }
 
-// Plusieurs fichiers sont analysés en même temps (« parallel » à la fois, 1 = un par un).
+// Les fichiers arrivent ligne par ligne pendant que Python lit encore les autres : l'analyse commence
+// sans attendre la fin de la lecture. « parallel » analyses tournent en même temps (1 = une par une).
 // Les résultats sortent dans l'ordre où ils finissent : Python les retrouve grâce à leur id.
-func runClassify(_ input: [String: Any]) async {
-    let today = input["today"] as? String ?? ""
-    let parallel = max(1, input["parallel"] as? Int ?? 1)
-    let items = (input["items"] as? [[String: Any]] ?? []).map {
-        (id: "\($0["id"] ?? "")", text: $0["text"] as? String ?? "",
-         date: $0["date"] as? String ?? "", meta: $0["meta"] as? String ?? "")
-    }
-    await withTaskGroup(of: Resultat.self) { group in
-        var next = 0
-        func launch() {
-            let it = items[next]
-            next += 1
-            group.addTask { await classifyOne(id: it.id, text: it.text, date: it.date, meta: it.meta, today: today) }
+func runClassify() async {
+    let lines = AsyncStream<String> { cont in
+        Thread.detachNewThread {
+            while let line = readLine() { cont.yield(line) }
+            cont.finish()
         }
-        while next < min(parallel, items.count) { launch() }
-        for await r in group {
-            emit(r.json)
-            if next < items.count { launch() }
+    }
+    var today = ""
+    var parallel = 1
+    await withTaskGroup(of: Void.self) { group in
+        var running = 0
+        for await line in lines {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+            if let t = obj["today"] as? String {
+                today = t
+                parallel = max(1, obj["parallel"] as? Int ?? 1)
+                continue
+            }
+            if running >= parallel {
+                await group.next()
+                running -= 1
+            }
+            let id = "\(obj["id"] ?? "")", text = obj["text"] as? String ?? ""
+            let date = obj["date"] as? String ?? "", meta = obj["meta"] as? String ?? ""
+            let day = today
+            group.addTask { emit(await classifyOne(id: id, text: text, date: date, meta: meta, today: day).json) }
+            running += 1
         }
     }
 }
@@ -245,7 +286,7 @@ case "check":
 case "extract":
     runExtract(readInput())
 case "classify":
-    await runClassify(readInput())
+    await runClassify()
 default:
     FileHandle.standardError.write("usage: screentri-analyze check|extract|classify\n".data(using: .utf8)!)
     exit(2)

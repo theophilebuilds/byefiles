@@ -331,6 +331,110 @@ def can_decide_without_ai(it):
     return sensitive_reason(it["text"]) is not None
 
 
+INSTALLER_EXT = {".dmg", ".pkg", ".mpkg", ".iso", ".xip", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz",
+                 ".bz2", ".xz", ".exe", ".msi", ".apk"}
+
+
+def rule_analysis(it):
+    """Analyse donnée par des règles fixes quand l'IA n'apporterait rien (installeurs, photos sans texte)."""
+    if os.path.splitext(it["file"])[1].lower() in INSTALLER_EXT:
+        return {"sujet": "Installeurs et archives", "type": "installeur_archive", "aVenir": False}
+    if it["kind"] == "image" and not it["text"].strip() and not is_screenshot(it["file"]):
+        return {"sujet": "Photos perso", "type": "photo_perso", "aVenir": False}
+    return None
+
+
+def series_name(it):
+    """Nom sans les suffixes de copie : « Garanties (1).pdf » et « Garanties - Copie.pdf » -> « garanties.pdf »."""
+    base, ext = os.path.splitext(it["file"])
+    base = re.sub(r"(?i)(\s*\(\d+\)|\s*-?\s*(copie|copy)(\s*\d+)?)+$", "", base).strip()
+    return norm(base) + ext.lower()
+
+
+class Grouper:
+    """Regroupe, au fur et à mesure qu'ils arrivent, les fichiers qui montrent la même chose.
+    L'IA n'analyse qu'un fichier par groupe. Liens :
+    - rafale : même genre, créés à moins de 5 min d'écart, texte proche ;
+    - série : même nom aux suffixes de copie près (« x (1).pdf »), même extension, taille à 20 % près ;
+    - image quasi identique : empreintes visuelles à 3 bits ou moins (même capture redimensionnée,
+      recadrée de peu ou réenregistrée). Deux pages différentes d'un même document sont à 6 bits ou plus."""
+
+    def __init__(self):
+        self.items, self.parent, self.queued = [], [], []
+        self.words, self.by_name, self.hashed = [], {}, []
+
+    def find(self, i):
+        while self.parent[i] != i:
+            self.parent[i] = self.parent[self.parent[i]]
+            i = self.parent[i]
+        return i
+
+    def link(self, i, j):
+        ri, rj = self.find(i), self.find(j)
+        if ri != rj:
+            self.parent[ri] = rj
+            self.queued[rj] = self.queued[rj] or self.queued[ri]
+
+    def add(self, it):
+        i = len(self.items)
+        self.items.append(it)
+        self.parent.append(i)
+        self.queued.append(False)
+        w = words(it["text"])
+        self.words.append(w)
+        for j, other in enumerate(self.items[:-1]):
+            if other["kind"] != it["kind"] or abs((it["date"] - other["date"]).total_seconds()) > 300:
+                continue
+            u = w | self.words[j]
+            if u and len(w & self.words[j]) / len(u) >= 0.35:
+                self.link(i, j)
+        name = series_name(it)
+        for j in self.by_name.get(name, []):
+            small, big = sorted((it["size"], self.items[j]["size"]))
+            if big and small / big >= 0.8:
+                self.link(i, j)
+                break
+        self.by_name.setdefault(name, []).append(i)
+        if it["kind"] == "image" and it.get("dhash"):
+            h = int(it["dhash"], 16)
+            for j, hj in self.hashed:
+                if bin(h ^ hj).count("1") <= 3:
+                    self.link(i, j)
+                    break
+            self.hashed.append((i, h))
+        return i
+
+    def members(self, i):
+        root = self.find(i)
+        return [k for k in range(len(self.items)) if self.find(k) == root]
+
+
+class StreamEngine:
+    """Moteur d'analyse IA qui reçoit les fichiers un par un et répond au fil de l'eau."""
+
+    def __init__(self, config, on_result):
+        import threading
+        self.p = subprocess.Popen([ENGINE, "classify"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  text=True, bufsize=1)
+        self.send(config)
+        self.reader = threading.Thread(target=self._read, args=(on_result,), daemon=True)
+        self.reader.start()
+
+    def send(self, obj):
+        self.p.stdin.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        self.p.stdin.flush()
+
+    def _read(self, on_result):
+        for line in self.p.stdout:
+            if line.strip():
+                on_result(json.loads(line))
+
+    def finish(self):
+        self.p.stdin.close()
+        self.reader.join()
+        self.p.wait()
+
+
 def find_dups(items):
     """Doublons exacts : même taille d'abord, puis même contenu."""
     by_size = {}
@@ -354,7 +458,7 @@ def find_dups(items):
     return dups
 
 
-def build(folder, items, cache, today, dups):
+def build(folder, items, cache, today, dups, total=None):
     """Catégories et groupes pour les fichiers déjà prêts (analysés, ou classables sans l'IA)."""
     ready = [it for it in items if it["analysis"] is not None or can_decide_without_ai(it)]
     theme_of = merge_topics([it for it in ready if it["analysis"] is not None])
@@ -377,11 +481,14 @@ def build(folder, items, cache, today, dups):
             {"label": lab, "files": [x["file"] for x in sorted(g[lab], key=lambda x: x["date"], reverse=True)]}
             for lab in labels]})
     return {"folder": folder, "groups": out_groups, "dups": dups, "info": info,
-            "pending": len(items) - len(ready), "text": {it["file"]: it["text"][:1500] for it in ready}}
+            "pending": (total or len(items)) - len(ready), "text": {it["file"]: it["text"][:1500] for it in ready}}
 
 
 def analyze(folder, live, reanalyze=False):
-    """Analyse le dossier et publie dans `live` ce qui est prêt, au fur et à mesure."""
+    """Analyse le dossier et publie dans `live` ce qui est prêt, au fur et à mesure.
+    L'IA commence dès que les premiers fichiers sont lus, sans attendre la fin de la lecture."""
+    import threading
+    import time
     files = list_files(folder)
     cache = load_cache()
     if reanalyze:
@@ -389,112 +496,127 @@ def analyze(folder, live, reanalyze=False):
         cache = {p: c for p, c in cache.items() if os.path.dirname(p) != folder}
 
     def key(p):
-        st = os.stat(p)
-        return f"v2:{st.st_size}:{int(st.st_mtime)}"
-
-    def safe_key(p):
         try:
-            return key(p)
+            st = os.stat(p)
+            return f"v2:{st.st_size}:{int(st.st_mtime)}"
         except OSError:
             return None
 
-    # 1. Lecture du contenu et aperçus des fichiers nouveaux ou modifiés
-    todo = [p for p in files if cache.get(p, {}).get("key") != safe_key(p)]
+    todo = [p for p in files if cache.get(p, {}).get("key") != key(p)]
+    today = dt.datetime.now()
+    mu = threading.Lock()  # protège tout l'état ci-dessous (lecture et réponses de l'IA arrivent en parallèle)
+    G = Grouper()
+    thumbs, dups = {}, []
+    count = {"read": 0, "sent": 0, "ai": 0, "reading": bool(todo), "last": 0.0}
+
+    def publish(force=False):
+        now = time.time()
+        if not force and now - count["last"] < 0.4:
+            return
+        count["last"] = now
+        if count["reading"]:
+            phase = f"Lecture des fichiers : {count['read']} / {len(todo)} · analyse par l'IA : {count['ai']} / {count['sent']}"
+        else:
+            phase = f"Analyse par l'IA d'Apple : {count['ai']} / {count['sent']}"
+        live.publish(data=build(folder, G.items, cache, today, dups, total=len(files)), thumbs=dict(thumbs),
+                     phase=phase, done=count["read"] + count["ai"], total=len(todo) + count["sent"])
+
+    def settle(i):
+        """Partage l'analyse connue dans le groupe de i, ou envoie un fichier du groupe à l'IA."""
+        group = [G.items[k] for k in G.members(i)]
+        known = next((m for m in group if m["analysis"] is not None and m["from_ai"]), None)
+        known = known or next((m for m in group if m["analysis"] is not None), None)
+        if known:
+            for m in group:
+                if m["analysis"] is None:
+                    m["analysis"], m["from_ai"] = known["analysis"], known["from_ai"]
+                    if known["from_ai"]:
+                        cache[m["path"]]["analysis"] = known["analysis"]
+            return
+        root = G.find(i)
+        needs = [k for k in G.members(i) if not can_decide_without_ai(G.items[k])]
+        if G.queued[root] or not needs:
+            return
+        G.queued[root] = True
+        k = max(needs, key=lambda k: len(G.items[k]["text"]))
+        rep = G.items[k]
+        meta = (f"Nom du fichier : {rep['file']} — genre : {KIND_LABEL.get(rep['kind'], 'fichier')}"
+                f" — taille : {human_size(rep['size'])}")
+        count["sent"] += 1
+        ai.send({"id": str(k), "text": rep["text"], "date": rep["date"].strftime("%d/%m/%Y"), "meta": meta})
+
+    def add(p):
+        c = cache[p]
+        try:
+            it = {"path": p, "file": os.path.basename(p), "text": c.get("text", ""), "kind": c.get("kind", "other"),
+                  "size": os.path.getsize(p), "date": capture_date(p), "dhash": c.get("dhash"),
+                  "analysis": c.get("analysis"), "from_ai": c.get("analysis") is not None}
+        except OSError:
+            return  # mis à la Corbeille ou déplacé entre-temps
+        if it["analysis"] is None:
+            # Installeurs, archives et photos sans texte : les règles fixes suffisent
+            it["analysis"] = rule_analysis(it)
+        thumbs[it["file"]] = c.get("thumb")
+        settle(G.add(it))
+
+    def on_result(o):
+        with mu:
+            count["ai"] += 1
+            res = {k: o.get(k) for k in ("sujet", "type", "aVenir")}
+            k = int(o["id"])
+            G.items[k]["analysis"], G.items[k]["from_ai"] = res, True
+            cache[G.items[k]["path"]]["analysis"] = res
+            settle(k)
+            if count["ai"] % 10 == 0:
+                save_cache(cache)
+            publish()
+
+    ai = StreamEngine({"today": today.strftime("%d/%m/%Y"), "parallel": PARALLEL}, on_result)
+
+    # 1. Fichiers déjà lus lors d'un lancement précédent : tout de suite
+    with mu:
+        for p in files:
+            if p not in todo:
+                add(p)
+        publish(force=True)
+
+    # 2. Lecture des fichiers nouveaux ou modifiés : chacun part à l'IA dès qu'il est lu
     if todo:
         log(f"Lecture du contenu et création des aperçus : {len(todo)} fichier(s)…")
-        live.publish(phase="Lecture du contenu des fichiers", done=0, total=len(todo))
-        n = [0]
 
         def got(o):
-            n[0] += 1
             p = o["path"]
             text = o.get("text", "")
             if os.path.splitext(p)[1].lower() in (".pptx", ".xlsx", ".docx", ".odt", ".odp", ".ods"):
                 text = office_text(p) or text
             if o.get("kind") == "html":
                 text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<(script|style)[\s\S]*?</\1>|<[^>]+>", " ", text)))
-            cache[p] = {"key": safe_key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb")}
-            live.publish(done=n[0])
-            if n[0] % 20 == 0 or n[0] == len(todo):
-                log(f"  {n[0]}/{len(todo)}")
-                save_cache(cache)
+            with mu:
+                count["read"] += 1
+                cache[p] = {"key": key(p), "kind": o.get("kind", "other"), "text": text, "thumb": o.get("thumb"),
+                            "dhash": o.get("dhash")}
+                add(p)
+                if count["read"] % 20 == 0 or count["read"] == len(todo):
+                    log(f"  {count['read']}/{len(todo)}")
+                    save_cache(cache)
+                publish()
         engine("extract", {"files": todo, "thumbs": THUMBS}, got)
+
+    # 3. Doublons exacts, puis on attend les dernières réponses de l'IA
+    found = find_dups(G.items)
+    with mu:
+        dups[:] = found
+        count["reading"] = False
+        log(f"Analyse par le modèle d'Apple : {count['sent']} fichier(s) ou groupe(s)…")
+        publish(force=True)
+    ai.finish()
+
+    with mu:
         save_cache(cache)
-
-    items = []
-    for p in files:
-        c = cache.get(p)
-        if not c:
-            continue
-        try:
-            items.append({"path": p, "file": os.path.basename(p), "text": c.get("text", ""),
-                          "kind": c.get("kind", "other"), "size": os.path.getsize(p), "date": capture_date(p),
-                          "analysis": c.get("analysis")})
-        except OSError:
-            continue  # mis à la Corbeille ou déplacé entre-temps
-    items.sort(key=lambda x: x["date"])
-    thumbs = {it["file"]: cache[it["path"]].get("thumb") for it in items}
-
-    # 2. Rafales : fichiers du même genre créés à moins de 5 min d'écart, avec un texte très proche
-    bursts, cur = [], []
-    for it in items:
-        if cur:
-            prev = cur[-1]
-            gap = (it["date"] - prev["date"]).total_seconds()
-            a, b = words(prev["text"]), words(it["text"])
-            sim = len(a & b) / len(a | b) if a | b else 0.0
-            if gap <= 300 and prev["kind"] == it["kind"] and sim >= 0.35:
-                cur.append(it)
-                continue
-            bursts.append(cur)
-        cur = [it]
-    if cur:
-        bursts.append(cur)
-
-    # Fichiers déjà analysés lors d'un lancement précédent : la rafale reprend l'analyse de son représentant
-    for b in bursts:
-        rep = max(b, key=lambda x: len(x["text"]))
-        if rep["analysis"] is not None:
-            for it in b:
-                it["analysis"] = it["analysis"] or rep["analysis"]
-
-    today = dt.datetime.now()
-    dups = find_dups(items)
-
-    # 3. Analyse par le modèle d'Apple : une fois par rafale (sur le fichier le plus riche)
-    need = []
-    for i, b in enumerate(bursts):
-        rep = max(b, key=lambda x: len(x["text"]))
-        # Captures vides et données sensibles : les règles fixes suffisent, pas besoin de l'IA
-        if rep["analysis"] is None and not can_decide_without_ai(rep):
-            meta = (f"Nom du fichier : {rep['file']} — genre : {KIND_LABEL.get(rep['kind'], 'fichier')}"
-                    f" — taille : {human_size(rep['size'])}")
-            need.append({"id": str(i), "text": rep["text"], "date": rep["date"].strftime("%d/%m/%Y"), "meta": meta})
-
-    # Ce qui est déjà prêt s'affiche tout de suite dans l'interface
-    live.publish(data=build(folder, items, cache, today, dups), thumbs=thumbs,
-                 phase="Analyse par l'IA d'Apple", done=0, total=len(need))
-    if need:
-        log(f"Analyse par le modèle d'Apple : {len(need)} fichier(s) ou rafale(s)…")
-        n = [0]
-
-        def got_cls(o):
-            n[0] += 1
-            res = {k: o.get(k) for k in ("sujet", "type", "aVenir")}
-            for it in bursts[int(o["id"])]:
-                it["analysis"] = res
-                cache[it["path"]]["analysis"] = res
-            live.publish(data=build(folder, items, cache, today, dups), done=n[0])
-            if n[0] % 10 == 0 or n[0] == len(need):
-                log(f"  {n[0]}/{len(need)}")
-                save_cache(cache)
-        engine("classify", {"today": today.strftime("%d/%m/%Y"), "parallel": PARALLEL, "items": need}, got_cls)
-        save_cache(cache)
-    for it in items:
-        it["analysis"] = it["analysis"] or {"sujet": "", "type": "autre"}
-
-    data = build(folder, items, cache, today, dups)
-    live.publish(data=data, phase="Terminé", finished=True)
+        for it in G.items:
+            it["analysis"] = it["analysis"] or {"sujet": "", "type": "autre"}
+        data = build(folder, G.items, cache, today, dups, total=len(files))
+        live.publish(data=data, thumbs=dict(thumbs), phase="Terminé", finished=True)
     return data
 
 
