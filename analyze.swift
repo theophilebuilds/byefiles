@@ -57,10 +57,10 @@ func cgFromFile(_ path: String) -> CGImage? {
     NSImage(contentsOfFile: path)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
 }
 
-// MARK: - Aperçu Quick Look (JPEG, 900 px max)
+// MARK: - Aperçu Quick Look (JPEG)
 
-func thumbnail(_ url: URL, to out: String) -> CGImage? {
-    let req = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 900, height: 900),
+func thumbnail(_ url: URL, to out: String, size: CGFloat) -> CGImage? {
+    let req = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: size, height: size),
                                            scale: 1, representationTypes: .thumbnail)
     let sem = DispatchSemaphore(value: 0)
     var result: CGImage?
@@ -84,7 +84,6 @@ func extract(_ path: String, thumbsDir: String) -> [String: Any] {
     let kind = kindOf(url)
     let hash = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined().prefix(24)
     let thumbPath = "\(thumbsDir)/\(hash).jpg"
-    let thumbCG = thumbnail(url, to: thumbPath)
     var text = ""
 
     switch kind {
@@ -116,8 +115,11 @@ func extract(_ path: String, thumbsDir: String) -> [String: Any] {
     default:
         break
     }
-    // Rien d'exploitable : on lit le texte visible dans l'aperçu (slides, Pages, vidéo…)
-    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, kind != "image", let cg = thumbCG {
+    // Miniature de 300 px pour la grille. Quand il n'y a aucun texte à lire (slides, Pages, vidéo…),
+    // on la fait en 900 px pour lire en OCR le texte visible dessus.
+    let needsOCR = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && kind != "image"
+    let thumbCG = thumbnail(url, to: thumbPath, size: needsOCR ? 900 : 300)
+    if needsOCR, let cg = thumbCG {
         text = ocrCG(cg)
     }
     var r: [String: Any] = ["path": path, "kind": kind, "text": String(text.prefix(20_000))]
