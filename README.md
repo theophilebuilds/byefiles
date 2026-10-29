@@ -20,21 +20,27 @@ BYE Files reads every file in a folder (screenshots, PDFs, Office and Pages docu
 ## Requirements
 
 - Apple Silicon Mac, macOS 26 or later, **Apple Intelligence turned on**
-- Python 3 (standard library only)
-- Xcode command line tools: `xcode-select --install`
 
 ## Install
+
+```sh
+brew install theophilebuilds/tap/byefiles
+```
+
+Update with `brew upgrade byefiles`.
+
+<details>
+<summary>From source (needs the full Xcode app, not just the command line tools)</summary>
 
 ```sh
 git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
 cd ~/Projects/byefiles
 mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
-
-# optional: a `byefiles` command
-mkdir -p ~/.local/bin
-printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles
-chmod +x ~/.local/bin/byefiles
+python3 -I byefiles.py ~/Downloads
 ```
+
+Apple's model needs a compiler plugin that only ships with Xcode.
+</details>
 
 ## Usage
 

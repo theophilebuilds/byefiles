@@ -23,6 +23,7 @@ import webbrowser
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+VERSION = "0.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.join(HERE, "bin", "byefiles-analyze")
 STATE = os.path.expanduser("~/.byefiles")
@@ -846,6 +847,7 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="ne pas ouvrir le navigateur")
     ap.add_argument("--reanalyze", action="store_true", help="refaire l'analyse sans le cache")
+    ap.add_argument("--version", action="version", version=f"byefiles {VERSION}")
     args = ap.parse_args()
 
     folder = os.path.realpath(os.path.expanduser(args.dossier))

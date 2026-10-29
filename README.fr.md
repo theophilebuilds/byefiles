@@ -20,21 +20,27 @@ BYE Files lit chaque fichier d'un dossier (captures, PDF, documents Office et Pa
 ## Prérequis
 
 - Mac Apple Silicon, macOS 26 ou plus récent, **Apple Intelligence activé**
-- Python 3 (bibliothèque standard uniquement)
-- Outils en ligne de commande Xcode : `xcode-select --install`
 
 ## Installation
+
+```sh
+brew install theophilebuilds/tap/byefiles
+```
+
+Mise à jour : `brew upgrade byefiles`.
+
+<details>
+<summary>Depuis le code source (demande l'app Xcode complète, pas seulement les outils en ligne de commande)</summary>
 
 ```sh
 git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
 cd ~/Projects/byefiles
 mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
-
-# facultatif : une commande `byefiles`
-mkdir -p ~/.local/bin
-printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles
-chmod +x ~/.local/bin/byefiles
+python3 -I byefiles.py ~/Downloads
 ```
+
+Le modèle d'Apple a besoin d'un module du compilateur qui n'est fourni qu'avec Xcode.
+</details>
 
 ## Utilisation
 
