@@ -74,13 +74,13 @@ Dans l'interface (`http://127.0.0.1:8765`) :
    │
    ▼
  1. Extraction ──────────── Swift : Quick Look, PDFKit, Vision (OCR)
-   │   texte + aperçu de chaque fichier
-   ▼
- 2. Rafales ─────────────── Python : fichiers proches dans le temps et dans le texte
-   │
+   │   texte + aperçu + empreinte visuelle de chaque fichier
+   ▼   (fichier par fichier : l'IA démarre sans attendre la fin)
+ 2. Groupes ─────────────── Python : rafales, séries « (1) », images quasi identiques
+   │   + installeurs, photos et données sensibles classés sans IA
    ▼
  3. Analyse IA ──────────── Swift : Foundation Models (modèle d'Apple, local)
-   │   sujet, type, échéance à venir
+   │   un fichier par groupe, 2 à la fois : sujet, type, échéance à venir
    ▼
  4. Règles de tri ───────── Python : fonction decide()
    │   catégorie + raison
@@ -101,11 +101,23 @@ Le moteur Swift (`analyze.swift`) traite les fichiers en parallèle (4 à la foi
 - **Textes, code, HTML** : lecture directe (le HTML est débarrassé de ses balises).
 - **Le reste** (vidéos, Keynote, Pages…) : **Quick Look** génère un aperçu, et le texte visible dessus passe en OCR.
 
-Chaque fichier reçoit aussi une miniature Quick Look (JPEG, 900 px max) pour l'interface.
+Chaque fichier reçoit aussi une miniature Quick Look pour l'interface (JPEG de 300 px, ou 900 px quand l'aperçu sert à l'OCR). Pour les images, le moteur calcule en plus une **empreinte visuelle** (dHash) : la miniature réduite à 9×8 pixels en gris, où chaque bit dit si un pixel est plus clair que son voisin.
 
-### 2. Détection des rafales
+Chaque fichier lu part aussitôt vers l'étape suivante : l'IA commence à analyser les premiers fichiers pendant que les autres sont encore en lecture.
 
-Quand tu fais dix captures d'affilée du même écran, il serait inutile de les analyser dix fois. screentri regroupe les fichiers du même genre créés à moins de 5 minutes d'écart et dont le texte se ressemble à au moins 35 % (similarité de Jaccard sur les mots). Seul le fichier le plus riche de la rafale passe dans l'IA, et le résultat s'applique à tous.
+### 2. Groupes et fichiers classés sans IA
+
+L'IA est l'étape la plus lente (environ 1 s par fichier). screentri l'évite dès qu'elle n'apporte rien.
+
+**Fichiers qui montrent la même chose** : ils forment un groupe, et un seul fichier par groupe passe dans l'IA. Le résultat s'applique à tous. Deux fichiers sont reliés si c'est :
+- une **rafale** : même genre, créés à moins de 5 minutes d'écart, texte ressemblant à au moins 35 % (similarité de Jaccard sur les mots) ;
+- une **série** : même nom aux suffixes de copie près (« Garanties.pdf », « Garanties (1).pdf », « Garanties - Copie.pdf »), même extension, taille à 20 % près ;
+- une **image quasi identique** : empreintes visuelles à 3 bits ou moins l'une de l'autre, même à plusieurs jours d'écart (la même capture redimensionnée ou réenregistrée). Deux pages différentes d'un même document sont à 6 bits ou plus.
+
+**Fichiers que les règles suffisent à classer** :
+- installeurs et archives, reconnus à leur extension (`.dmg`, `.pkg`, `.zip`, `.iso`…) ;
+- images sans aucun texte qui ne sont pas des captures : des photos perso ;
+- captures vides et fichiers contenant une donnée sensible (voir les règles plus bas).
 
 ### 3. Analyse par le modèle d'Apple
 
@@ -167,16 +179,17 @@ La suppression passe par la commande `trash` de macOS : les fichiers vont dans l
 | Fichier | Rôle |
 |---|---|
 | `analyze.swift` | Moteur natif : extraction du texte, OCR, aperçus Quick Look, appel au modèle d'Apple. Compilé en `bin/screentri-analyze`. |
-| `screentri.py` | Orchestration : cache, rafales, règles de tri, regroupement, doublons, serveur web, Corbeille et annulation. |
+| `screentri.py` | Orchestration : cache, groupes de fichiers similaires, règles de tri, regroupement par sujet, doublons, serveur web, Corbeille et annulation. |
 | `ui.html` | Interface (HTML, CSS et JavaScript, mode sombre inclus). |
 | `~/.screentri/` | Données locales : cache d'analyse, miniatures, aperçus, historique des mises à la Corbeille (`trash-log.txt`, `undo.json`). |
 
-Les deux programmes communiquent en JSON : Python envoie la liste des fichiers sur l'entrée standard du moteur Swift, qui répond un objet JSON par ligne au fur et à mesure. La progression s'affiche donc en direct.
+Les deux programmes communiquent en JSON par l'entrée et la sortie standard du moteur Swift, qui répond un objet JSON par ligne au fur et à mesure. La progression s'affiche donc en direct.
 
 ```sh
 bin/screentri-analyze check      # le modèle d'Apple est-il disponible ?
-bin/screentri-analyze extract    # {"files":[…],"thumbs":"…"}  →  texte + aperçu par fichier
-bin/screentri-analyze classify   # {"today":"…","items":[…]}    →  sujet, type, aVenir
+bin/screentri-analyze extract    # {"files":[…],"thumbs":"…"}  →  texte, aperçu, empreinte par fichier
+bin/screentri-analyze classify   # 1re ligne {"today":"…","parallel":2}, puis un fichier par ligne,
+                                 # envoyés au fil de l'eau  →  sujet, type, aVenir
 ```
 
 ## Personnaliser
