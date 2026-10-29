@@ -331,6 +331,19 @@ def can_decide_without_ai(it):
     return sensitive_reason(it["text"]) is not None
 
 
+INSTALLER_EXT = {".dmg", ".pkg", ".mpkg", ".iso", ".xip", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz",
+                 ".bz2", ".xz", ".exe", ".msi", ".apk"}
+
+
+def rule_analysis(it):
+    """Analyse donnée par des règles fixes quand l'IA n'apporterait rien (installeurs, photos sans texte)."""
+    if os.path.splitext(it["file"])[1].lower() in INSTALLER_EXT:
+        return {"sujet": "Installeurs et archives", "type": "installeur_archive", "aVenir": False}
+    if it["kind"] == "image" and not it["text"].strip() and not is_screenshot(it["file"]):
+        return {"sujet": "Photos perso", "type": "photo_perso", "aVenir": False}
+    return None
+
+
 def find_dups(items):
     """Doublons exacts : même taille d'abord, puis même contenu."""
     by_size = {}
@@ -450,6 +463,11 @@ def analyze(folder, live, reanalyze=False):
         cur = [it]
     if cur:
         bursts.append(cur)
+
+    # Installeurs, archives et photos sans texte : les règles fixes suffisent
+    for it in items:
+        if it["analysis"] is None:
+            it["analysis"] = rule_analysis(it)
 
     # Fichiers déjà analysés lors d'un lancement précédent : la rafale reprend l'analyse de son représentant
     for b in bursts:
