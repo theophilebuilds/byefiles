@@ -344,6 +344,51 @@ def rule_analysis(it):
     return None
 
 
+def series_name(it):
+    """Nom sans les suffixes de copie : « Garanties (1).pdf » et « Garanties - Copie.pdf » -> « garanties.pdf »."""
+    base, ext = os.path.splitext(it["file"])
+    base = re.sub(r"(?i)(\s*\(\d+\)|\s*-?\s*(copie|copy)(\s*\d+)?)+$", "", base).strip()
+    return norm(base) + ext.lower()
+
+
+def similar_groups(items):
+    """Regroupe les fichiers qui montrent la même chose. Liens :
+    - rafale : même genre, créés à moins de 5 min d'écart, texte proche (items triés par date) ;
+    - série : même nom aux suffixes de copie près (« x (1).pdf »), même extension, taille à 20 % près."""
+    parent = list(range(len(items)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def link(i, j):
+        parent[find(i)] = find(j)
+
+    for i in range(1, len(items)):
+        prev, it = items[i - 1], items[i]
+        gap = (it["date"] - prev["date"]).total_seconds()
+        a, b = words(prev["text"]), words(it["text"])
+        sim = len(a & b) / len(a | b) if a | b else 0.0
+        if gap <= 300 and prev["kind"] == it["kind"] and sim >= 0.35:
+            link(i, i - 1)
+
+    by_name = {}
+    for i, it in enumerate(items):
+        for j in by_name.get(series_name(it), []):
+            small, big = sorted((it["size"], items[j]["size"]))
+            if big and small / big >= 0.8:
+                link(i, j)
+                break
+        by_name.setdefault(series_name(it), []).append(i)
+
+    groups = {}
+    for i, it in enumerate(items):
+        groups.setdefault(find(i), []).append(it)
+    return list(groups.values())
+
+
 def find_dups(items):
     """Doublons exacts : même taille d'abord, puis même contenu."""
     by_size = {}
@@ -448,21 +493,8 @@ def analyze(folder, live, reanalyze=False):
     items.sort(key=lambda x: x["date"])
     thumbs = {it["file"]: cache[it["path"]].get("thumb") for it in items}
 
-    # 2. Rafales : fichiers du même genre créés à moins de 5 min d'écart, avec un texte très proche
-    bursts, cur = [], []
-    for it in items:
-        if cur:
-            prev = cur[-1]
-            gap = (it["date"] - prev["date"]).total_seconds()
-            a, b = words(prev["text"]), words(it["text"])
-            sim = len(a & b) / len(a | b) if a | b else 0.0
-            if gap <= 300 and prev["kind"] == it["kind"] and sim >= 0.35:
-                cur.append(it)
-                continue
-            bursts.append(cur)
-        cur = [it]
-    if cur:
-        bursts.append(cur)
+    # 2. Groupes de fichiers qui montrent la même chose : l'IA n'en analysera qu'un par groupe
+    bursts = similar_groups(items)
 
     # Installeurs, archives et photos sans texte : les règles fixes suffisent
     for it in items:
