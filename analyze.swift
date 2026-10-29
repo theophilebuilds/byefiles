@@ -2,8 +2,9 @@
 // Tout tourne sur le Mac, rien n'est envoyé sur internet.
 // Modes (entrée JSON sur stdin, sortie JSON ligne par ligne sur stdout) :
 //   check     -> dit si le modèle d'Apple est disponible
-//   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb"} par ligne
-//   classify  -> {"today","parallel","items":[{"id","text","date","meta"}]} => {"id","sujet","type","aVenir"} par ligne
+//   extract   -> {"files":[chemins],"thumbs":dossier} => {"path","kind","text","thumb","dhash"} par ligne
+//   classify  -> une ligne {"today","parallel"}, puis une ligne {"id","text","date","meta"} par fichier,
+//                envoyées au fil de l'eau => {"id","sujet","type","aVenir"} par ligne
 import AppKit
 import Foundation
 import FoundationModels
@@ -13,11 +14,15 @@ import UniformTypeIdentifiers
 import Vision
 import CryptoKit
 
+let emitLock = NSLock()
+
 func emit(_ obj: [String: Any]) {
     if let d = try? JSONSerialization.data(withJSONObject: obj),
        let s = String(data: d, encoding: .utf8) {
+        emitLock.lock()
         print(s)
         fflush(stdout)
+        emitLock.unlock()
     }
 }
 
@@ -237,26 +242,36 @@ func classifyOne(id: String, text: String, date: String, meta: String, today: St
     }
 }
 
-// Plusieurs fichiers sont analysés en même temps (« parallel » à la fois, 1 = un par un).
+// Les fichiers arrivent ligne par ligne pendant que Python lit encore les autres : l'analyse commence
+// sans attendre la fin de la lecture. « parallel » analyses tournent en même temps (1 = une par une).
 // Les résultats sortent dans l'ordre où ils finissent : Python les retrouve grâce à leur id.
-func runClassify(_ input: [String: Any]) async {
-    let today = input["today"] as? String ?? ""
-    let parallel = max(1, input["parallel"] as? Int ?? 1)
-    let items = (input["items"] as? [[String: Any]] ?? []).map {
-        (id: "\($0["id"] ?? "")", text: $0["text"] as? String ?? "",
-         date: $0["date"] as? String ?? "", meta: $0["meta"] as? String ?? "")
-    }
-    await withTaskGroup(of: Resultat.self) { group in
-        var next = 0
-        func launch() {
-            let it = items[next]
-            next += 1
-            group.addTask { await classifyOne(id: it.id, text: it.text, date: it.date, meta: it.meta, today: today) }
+func runClassify() async {
+    let lines = AsyncStream<String> { cont in
+        Thread.detachNewThread {
+            while let line = readLine() { cont.yield(line) }
+            cont.finish()
         }
-        while next < min(parallel, items.count) { launch() }
-        for await r in group {
-            emit(r.json)
-            if next < items.count { launch() }
+    }
+    var today = ""
+    var parallel = 1
+    await withTaskGroup(of: Void.self) { group in
+        var running = 0
+        for await line in lines {
+            guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+            if let t = obj["today"] as? String {
+                today = t
+                parallel = max(1, obj["parallel"] as? Int ?? 1)
+                continue
+            }
+            if running >= parallel {
+                await group.next()
+                running -= 1
+            }
+            let id = "\(obj["id"] ?? "")", text = obj["text"] as? String ?? ""
+            let date = obj["date"] as? String ?? "", meta = obj["meta"] as? String ?? ""
+            let day = today
+            group.addTask { emit(await classifyOne(id: id, text: text, date: date, meta: meta, today: day).json) }
+            running += 1
         }
     }
 }
@@ -271,7 +286,7 @@ case "check":
 case "extract":
     runExtract(readInput())
 case "classify":
-    await runClassify(readInput())
+    await runClassify()
 default:
     FileHandle.standardError.write("usage: screentri-analyze check|extract|classify\n".data(using: .utf8)!)
     exit(2)

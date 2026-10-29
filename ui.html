@@ -246,9 +246,8 @@ function showProgress(st, pending){
   p.classList.toggle("err", !!st.error);
   if(st.error){ $("#progt").textContent = "Erreur pendant l'analyse : " + st.error; return }
   if(st.finished) return;
-  const steps = st.total ? ` : ${st.done} / ${st.total}` : "";
   const wait = pending ? ` · ${pending} fichier(s) pas encore classé(s), ils apparaissent au fur et à mesure` : "";
-  $("#progt").textContent = st.phase + steps + wait;
+  $("#progt").textContent = st.phase + wait;
   $("#progb").style.width = st.total ? Math.round(100 * st.done / st.total) + "%" : "0";
 }
 
