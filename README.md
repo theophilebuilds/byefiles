@@ -1,10 +1,12 @@
-# screentri
+# BYE Files
+
+*Bin Your Extras Files*
 
 **Sort a messy folder (Downloads, Desktop, screenshots…) with Apple's on-device AI. Nothing leaves your Mac.**
 
 [Version française](README.fr.md)
 
-screentri reads every file in a folder (screenshots, PDFs, Office and Pages documents, text, videos, installers…), works out what each one is about, and sorts it into four categories:
+BYE Files reads every file in a folder (screenshots, PDFs, Office and Pages documents, text, videos, installers…), works out what each one is about, and sorts it into four categories:
 
 | | |
 |---|---|
@@ -13,7 +15,7 @@ screentri reads every file in a folder (screenshots, PDFs, Office and Pages docu
 | ✅ **Keep** | recent projects, upcoming tickets and appointments, invoices, contracts, CVs… |
 | ⚠️ **Sensitive** | ID documents, IBANs, API keys, passwords, recovery codes |
 
-**It opens in your browser.** Running `screentri` starts a small web server on your Mac (port 8765 by default) and opens `http://127.0.0.1:8765`, where you review everything: previews, one-click selection, move to Trash, undo. The server only runs locally, can't be reached from other devices, and stops when you press Ctrl+C in the terminal.
+**It opens in your browser.** Running `byefiles` starts a small web server on your Mac (port 8765 by default) and opens `http://127.0.0.1:8765`, where you review everything: previews, one-click selection, move to Trash, undo. The server only runs locally, can't be reached from other devices, and stops when you press Ctrl+C in the terminal.
 
 ## Requirements
 
@@ -24,22 +26,22 @@ screentri reads every file in a folder (screenshots, PDFs, Office and Pages docu
 ## Install
 
 ```sh
-git clone https://github.com/theophilebuilds/screentri.git ~/Projects/screentri
-cd ~/Projects/screentri
-mkdir -p bin && swiftc -O analyze.swift -o bin/screentri-analyze
+git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
+cd ~/Projects/byefiles
+mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
 
-# optional: a `screentri` command
+# optional: a `byefiles` command
 mkdir -p ~/.local/bin
-printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/screentri/screentri.py" "$@"\n' > ~/.local/bin/screentri
-chmod +x ~/.local/bin/screentri
+printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles
+chmod +x ~/.local/bin/byefiles
 ```
 
 ## Usage
 
 ```sh
-screentri                 # current folder
-screentri ~/Downloads     # another folder
-screentri --reanalyze     # redo this folder from scratch
+byefiles                  # current folder
+byefiles ~/Downloads      # another folder
+byefiles --reanalyze      # redo this folder from scratch
 ```
 
 Options: `--port N` (default 8765), `--no-open` (don't open the browser). Only files at the top of the folder are sorted, not subfolders.
@@ -63,12 +65,12 @@ Sensitive data (IBAN, passport, API keys, private keys, tokens…) is detected w
 
 | | |
 |---|---|
-| `analyze.swift` | native engine: text, OCR, previews, Apple's model (compiled to `bin/screentri-analyze`) |
-| `screentri.py` | cache, grouping, sorting rules, local web server, Trash and undo |
+| `analyze.swift` | native engine: text, OCR, previews, Apple's model (compiled to `bin/byefiles-analyze`) |
+| `byefiles.py` | cache, grouping, sorting rules, local web server, Trash and undo |
 | `ui.html` | the interface |
-| `~/.screentri/` | local cache, previews and Trash history |
+| `~/.byefiles/` | local cache, previews and Trash history |
 
-To customise: delays and categories in `decide()`, sensitive patterns in `SENSITIVE` (`screentri.py`), AI content types in `Analyse` and `instructionsClassify` (`analyze.swift`, then recompile).
+To customise: delays and categories in `decide()`, sensitive patterns in `SENSITIVE` (`byefiles.py`), AI content types in `Analyse` and `instructionsClassify` (`analyze.swift`, then recompile).
 
 ## Limits
 

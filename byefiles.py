@@ -1,6 +1,6 @@
-"""screentri : trie les fichiers d'un dossier (captures, PDF, documents, vidéos…), 100 % en local.
+"""BYE Files (Bin Your Extras Files) : trie les fichiers d'un dossier (captures, PDF, documents, vidéos…), 100 % en local.
 
-Usage : screentri [dossier] [--port N] [--no-open] [--reanalyze]
+Usage : byefiles [dossier] [--port N] [--no-open] [--reanalyze]
   - dossier : par défaut le dossier courant (seuls les fichiers à la racine du dossier sont triés)
   - lecture du contenu et analyse par le modèle d'Apple, sur le Mac (rien ne part sur internet)
   - interface web sur http://127.0.0.1 (accessible seulement depuis ce Mac)
@@ -24,8 +24,12 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ENGINE = os.path.join(HERE, "bin", "screentri-analyze")
-STATE = os.path.expanduser("~/.screentri")
+ENGINE = os.path.join(HERE, "bin", "byefiles-analyze")
+STATE = os.path.expanduser("~/.byefiles")
+# Ancien nom (screentri) : on récupère le cache existant.
+_OLD_STATE = os.path.expanduser("~/.screentri")
+if os.path.isdir(_OLD_STATE) and not os.path.exists(STATE):
+    os.rename(_OLD_STATE, STATE)
 CACHE_FILE = os.path.join(STATE, "cache.json")
 THUMBS = os.path.join(STATE, "thumbs")
 PREVIEWS = os.path.join(STATE, "previews")
@@ -837,7 +841,7 @@ def make_handler(folder, live, token, page):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="screentri", description="Trie les fichiers d'un dossier, en local.")
+    ap = argparse.ArgumentParser(prog="byefiles", description="Trie les fichiers d'un dossier, en local.")
     ap.add_argument("dossier", nargs="?", default=".")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="ne pas ouvrir le navigateur")

@@ -1,10 +1,12 @@
-# screentri
+# BYE Files
+
+*Bin Your Extras Files* (« jette tes fichiers en trop »)
 
 **Trie un dossier en bazar (Téléchargements, Bureau, captures d'écran…) avec l'IA d'Apple, directement sur le Mac. Rien ne quitte ta machine.**
 
 [English version](README.md)
 
-screentri lit chaque fichier d'un dossier (captures, PDF, documents Office et Pages, textes, vidéos, installeurs…), comprend de quoi il parle et le range dans quatre catégories :
+BYE Files lit chaque fichier d'un dossier (captures, PDF, documents Office et Pages, textes, vidéos, installeurs…), comprend de quoi il parle et le range dans quatre catégories :
 
 | | |
 |---|---|
@@ -13,7 +15,7 @@ screentri lit chaque fichier d'un dossier (captures, PDF, documents Office et Pa
 | ✅ **À garder** | projets récents, billets et rendez-vous à venir, factures, contrats, CV… |
 | ⚠️ **Sensible** | pièces d'identité, IBAN, clés d'API, mots de passe, codes de récupération |
 
-**Ça s'ouvre dans ton navigateur.** Lancer `screentri` démarre un petit serveur web sur ton Mac (port 8765 par défaut) et ouvre `http://127.0.0.1:8765`, où tu valides tout : aperçus, sélection en un clic, Corbeille, annulation. Le serveur tourne seulement sur ton Mac, il est inaccessible depuis les autres appareils et s'arrête quand tu fais Ctrl+C dans le terminal.
+**Ça s'ouvre dans ton navigateur.** Lancer `byefiles` démarre un petit serveur web sur ton Mac (port 8765 par défaut) et ouvre `http://127.0.0.1:8765`, où tu valides tout : aperçus, sélection en un clic, Corbeille, annulation. Le serveur tourne seulement sur ton Mac, il est inaccessible depuis les autres appareils et s'arrête quand tu fais Ctrl+C dans le terminal.
 
 ## Prérequis
 
@@ -24,29 +26,29 @@ screentri lit chaque fichier d'un dossier (captures, PDF, documents Office et Pa
 ## Installation
 
 ```sh
-git clone https://github.com/theophilebuilds/screentri.git ~/Projects/screentri
-cd ~/Projects/screentri
-mkdir -p bin && swiftc -O analyze.swift -o bin/screentri-analyze
+git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
+cd ~/Projects/byefiles
+mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
 
-# facultatif : une commande `screentri`
+# facultatif : une commande `byefiles`
 mkdir -p ~/.local/bin
-printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/screentri/screentri.py" "$@"\n' > ~/.local/bin/screentri
-chmod +x ~/.local/bin/screentri
+printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles
+chmod +x ~/.local/bin/byefiles
 ```
 
 ## Utilisation
 
 ```sh
-screentri                 # dossier courant
-screentri ~/Downloads     # un autre dossier
-screentri --reanalyze     # refait ce dossier de zéro
+byefiles                  # dossier courant
+byefiles ~/Downloads      # un autre dossier
+byefiles --reanalyze      # refait ce dossier de zéro
 ```
 
 Options : `--port N` (8765 par défaut), `--no-open` (n'ouvre pas le navigateur). Seuls les fichiers à la racine du dossier sont triés, pas les sous-dossiers.
 
 **Patience au premier lancement.** L'IA prend environ 1 seconde par fichier : un dossier Téléchargements de 400 fichiers demande 5 à 7 minutes. La page s'ouvre tout de suite et se remplit au fur et à mesure, tu peux donc commencer à trier avant la fin.
 
-**Conseil : fais-le en plusieurs fois.** Tu peux arrêter à tout moment avec Ctrl+C. Les résultats sont gardés en cache : au lancement suivant, screentri reprend là où il s'était arrêté, et les fichiers déjà lus s'affichent tout de suite.
+**Conseil : fais-le en plusieurs fois.** Tu peux arrêter à tout moment avec Ctrl+C. Les résultats sont gardés en cache : au lancement suivant, BYE Files reprend là où il s'était arrêté, et les fichiers déjà lus s'affichent tout de suite.
 
 ## Comment ça marche
 
@@ -63,12 +65,12 @@ Les données sensibles (IBAN, passeport, clés d'API, clés privées, jetons…)
 
 | | |
 |---|---|
-| `analyze.swift` | moteur natif : texte, OCR, aperçus, modèle d'Apple (compilé en `bin/screentri-analyze`) |
-| `screentri.py` | cache, groupes, règles de tri, serveur web local, Corbeille et annulation |
+| `analyze.swift` | moteur natif : texte, OCR, aperçus, modèle d'Apple (compilé en `bin/byefiles-analyze`) |
+| `byefiles.py` | cache, groupes, règles de tri, serveur web local, Corbeille et annulation |
 | `ui.html` | l'interface |
-| `~/.screentri/` | cache local, aperçus et historique de la Corbeille |
+| `~/.byefiles/` | cache local, aperçus et historique de la Corbeille |
 
-Pour personnaliser : délais et catégories dans `decide()`, motifs sensibles dans `SENSITIVE` (`screentri.py`), types de contenu de l'IA dans `Analyse` et `instructionsClassify` (`analyze.swift`, puis recompiler).
+Pour personnaliser : délais et catégories dans `decide()`, motifs sensibles dans `SENSITIVE` (`byefiles.py`), types de contenu de l'IA dans `Analyse` et `instructionsClassify` (`analyze.swift`, puis recompiler).
 
 ## Limites
 

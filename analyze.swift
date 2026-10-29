@@ -1,4 +1,4 @@
-// screentri-analyze : extraction (texte + aperçu Quick Look) et analyse par le modèle d'Apple.
+// byefiles-analyze (BYE Files) : extraction (texte + aperçu Quick Look) et analyse par le modèle d'Apple.
 // Tout tourne sur le Mac, rien n'est envoyé sur internet.
 // Modes (entrée JSON sur stdin, sortie JSON ligne par ligne sur stdout) :
 //   check     -> dit si le modèle d'Apple est disponible
@@ -288,6 +288,6 @@ case "extract":
 case "classify":
     await runClassify()
 default:
-    FileHandle.standardError.write("usage: screentri-analyze check|extract|classify\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: byefiles-analyze check|extract|classify\n".data(using: .utf8)!)
     exit(2)
 }
