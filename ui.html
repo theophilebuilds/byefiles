@@ -76,6 +76,7 @@ main{max-width:1200px;margin:auto;padding:8px 16px 80px}
   <div class="bar">
     <span class="name" id="lbn"></span>
     <button id="lbprev">←</button><button id="lbnext">→</button>
+    <button id="lbsel" title="S"></button>
     <button id="lbopen">Ouvrir avec l'app</button>
     <button id="lbtrash" class="danger">Mettre à la Corbeille</button>
     <button id="lbundo" disabled title="⌘Z">↶ Annuler</button>
@@ -189,9 +190,28 @@ function showLb(){
     (i.raison ? `<b>Pourquoi ici :</b> ${esc(i.raison)}\n` : "") +
     (i.date ? `<b>Date :</b> ${esc(i.date)}\n` : "") +
     `\n<b>Texte détecté :</b>\n\n${esc(D.text[f] || "(aucun)")}`;
+  updLbSel();
   $("#lb").classList.add("on");
 }
+// Sélection du fichier ouvert (bouton ou touche S), synchronisée avec sa vignette.
+function updLbSel(){
+  const on = sel.has(lbList[lbI]);
+  $("#lbsel").textContent = on ? "☑ Sélectionné (S)" : "☐ Sélectionner (S)";
+}
+function toggleLbSel(){
+  const f = lbList[lbI];
+  if(f === undefined) return;
+  sel.has(f) ? sel.delete(f) : sel.add(f);
+  const t = document.querySelector(`.t[data-f="${CSS.escape(f)}"]`);
+  if(t){ t.classList.toggle("sel", sel.has(f)); t.querySelector("input").checked = sel.has(f) }
+  updSel(); updLbSel();
+}
+$("#lbsel").onclick = toggleLbSel;
 $("#lbclose").onclick = () => { $("#lb").classList.remove("on"); $("#lbview").innerHTML = ""; };
+// Un clic sur le fond sombre (à côté du fichier) ferme l'aperçu et ramène à la liste.
+$("#lb").addEventListener("click", e => {
+  if(e.target === $("#lb") || e.target.matches("#lb .body, #lbview, #lb .bar")) $("#lbclose").click();
+});
 $("#lbprev").onclick = () => {lbI--; showLb()};
 $("#lbnext").onclick = () => {lbI++; showLb()};
 $("#lbopen").onclick = () => post("/open", [lbList[lbI]]);
@@ -205,6 +225,7 @@ document.addEventListener("keydown", e => {
   if(e.key === "Escape") $("#lbclose").click();
   if(e.key === "ArrowLeft") $("#lbprev").click();
   if(e.key === "ArrowRight") $("#lbnext").click();
+  if(e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey && !e.altKey){ e.preventDefault(); toggleLbSel() }
 });
 $("#clr").onclick = () => {sel.clear(); render()};
 $("#bulk").onclick = () => trash([...sel]);

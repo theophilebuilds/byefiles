@@ -50,6 +50,8 @@ Options: `--port N` (default 8765), `--no-open` (don't open the browser). Only f
 
 **Tip: do it in several sittings.** Stop at any time with Ctrl+C. Results are cached, so the next run picks up where you left off and files already read show up instantly.
 
+**Keyboard shortcuts when a file is open:** `S` selects it (press again to unselect), `←` `→` go to the previous or next file, `Esc` or a click beside the file closes it, `⌘Z` undoes the last move to Trash.
+
 ## How it works
 
 1. **Read** (Swift): text extraction with PDFKit, OCR with Vision, Quick Look previews, and a visual fingerprint for images.

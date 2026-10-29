@@ -50,6 +50,8 @@ Options : `--port N` (8765 par défaut), `--no-open` (n'ouvre pas le navigateur)
 
 **Conseil : fais-le en plusieurs fois.** Tu peux arrêter à tout moment avec Ctrl+C. Les résultats sont gardés en cache : au lancement suivant, BYE Files reprend là où il s'était arrêté, et les fichiers déjà lus s'affichent tout de suite.
 
+**Raccourcis quand un fichier est ouvert :** `S` le sélectionne (rappuie pour le désélectionner), `←` `→` passent au fichier précédent ou suivant, `Échap` ou un clic à côté du fichier le ferme, `⌘Z` annule la dernière mise à la Corbeille.
+
 ## Comment ça marche
 
 1. **Lecture** (Swift) : texte avec PDFKit, OCR avec Vision, aperçus Quick Look, et une empreinte visuelle pour les images.
