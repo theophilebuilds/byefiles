@@ -383,7 +383,10 @@ def build(folder, items, cache, today, dups):
 def analyze(folder, live, reanalyze=False):
     """Analyse le dossier et publie dans `live` ce qui est prêt, au fur et à mesure."""
     files = list_files(folder)
-    cache = {} if reanalyze else load_cache()
+    cache = load_cache()
+    if reanalyze:
+        # On n'oublie que les fichiers de ce dossier : le cache des autres dossiers reste intact.
+        cache = {p: c for p, c in cache.items() if os.path.dirname(p) != folder}
 
     def key(p):
         st = os.stat(p)

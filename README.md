@@ -49,7 +49,7 @@ chmod +x ~/.local/bin/screentri
 ```sh
 screentri                 # trie le dossier courant
 screentri ~/Downloads     # trie un autre dossier
-screentri --reanalyze     # refait toute l'analyse sans utiliser le cache
+screentri --reanalyze     # refait l'analyse de ce dossier sans utiliser le cache
 screentri --port 9000     # change le port de l'interface (8765 par défaut)
 screentri --no-open       # n'ouvre pas le navigateur automatiquement
 ```
