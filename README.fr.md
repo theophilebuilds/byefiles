@@ -13,7 +13,7 @@ screentri lit chaque fichier d'un dossier (captures, PDF, documents Office et Pa
 | ✅ **À garder** | projets récents, billets et rendez-vous à venir, factures, contrats, CV… |
 | ⚠️ **Sensible** | pièces d'identité, IBAN, clés d'API, mots de passe, codes de récupération |
 
-Tu valides tout dans une page web locale : aperçus, sélection en un clic, Corbeille, annulation.
+**Ça s'ouvre dans ton navigateur.** Lancer `screentri` démarre un petit serveur web sur ton Mac (port 8765 par défaut) et ouvre `http://127.0.0.1:8765`, où tu valides tout : aperçus, sélection en un clic, Corbeille, annulation. Le serveur tourne seulement sur ton Mac, il est inaccessible depuis les autres appareils et s'arrête quand tu fais Ctrl+C dans le terminal.
 
 ## Prérequis
 

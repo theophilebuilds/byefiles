@@ -13,7 +13,7 @@ screentri reads every file in a folder (screenshots, PDFs, Office and Pages docu
 | ✅ **Keep** | recent projects, upcoming tickets and appointments, invoices, contracts, CVs… |
 | ⚠️ **Sensitive** | ID documents, IBANs, API keys, passwords, recovery codes |
 
-You review everything in a local web page: previews, one-click selection, move to Trash, undo.
+**It opens in your browser.** Running `screentri` starts a small web server on your Mac (port 8765 by default) and opens `http://127.0.0.1:8765`, where you review everything: previews, one-click selection, move to Trash, undo. The server only runs locally, can't be reached from other devices, and stops when you press Ctrl+C in the terminal.
 
 ## Requirements
 
