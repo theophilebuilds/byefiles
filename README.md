@@ -37,9 +37,14 @@ git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
 cd ~/Projects/byefiles
 mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
 python3 -I byefiles.py ~/Downloads
+
+# optional: a `byefiles-dev` command that runs this copy of the code
+mkdir -p ~/.local/bin
+printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles-dev
+chmod +x ~/.local/bin/byefiles-dev
 ```
 
-Apple's model needs a compiler plugin that only ships with Xcode.
+Apple's model needs a compiler plugin that only ships with Xcode. `byefiles-dev` runs your local code with your changes, while `byefiles` (from brew) runs the last release. Both share the same cache.
 </details>
 
 ## Usage

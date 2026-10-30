@@ -37,9 +37,14 @@ git clone https://github.com/theophilebuilds/byefiles.git ~/Projects/byefiles
 cd ~/Projects/byefiles
 mkdir -p bin && swiftc -O analyze.swift -o bin/byefiles-analyze
 python3 -I byefiles.py ~/Downloads
+
+# facultatif : une commande `byefiles-dev` qui lance cette copie du code
+mkdir -p ~/.local/bin
+printf '#!/bin/bash\nexec python3 -I "$HOME/Projects/byefiles/byefiles.py" "$@"\n' > ~/.local/bin/byefiles-dev
+chmod +x ~/.local/bin/byefiles-dev
 ```
 
-Le modèle d'Apple a besoin d'un module du compilateur qui n'est fourni qu'avec Xcode.
+Le modèle d'Apple a besoin d'un module du compilateur qui n'est fourni qu'avec Xcode. `byefiles-dev` lance ton code local avec tes modifications, `byefiles` (installé par brew) lance la dernière version publiée. Les deux partagent le même cache.
 </details>
 
 ## Utilisation
